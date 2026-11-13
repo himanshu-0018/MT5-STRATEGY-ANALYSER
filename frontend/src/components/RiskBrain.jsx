@@ -259,18 +259,21 @@ export const RiskBrain = ({ model, start, baselinePortfolio }) => {
           <label className="block">
             <span className="qf-label flex items-center justify-between">
               <span>Risk cap / strategy</span>
-              <span className="font-mono text-slate-300 normal-case tracking-normal">{riskCap === "1" ? "off" : `${Math.round(capShare * 100)}%`}</span>
+              <span className="font-mono text-slate-300 normal-case tracking-normal">{capShare > 1 ? "off" : `${Math.round(capShare * 100)}%`}</span>
             </span>
             <select data-testid="risk-cap-select" value={riskCap} onChange={(e) => { setRiskCap(e.target.value); setCustomLots(null); }}
               className="w-full mt-1.5 bg-slate-900 border border-slate-700 px-2 py-1.5 font-mono text-sm text-slate-100 focus:outline-none focus:border-cyan-400">
-              <option value="1">No cap (max profit)</option>
+              <option value="1">100% - no EA above the budget</option>
               <option value="0.5">50% of budget per EA</option>
               <option value="0.33">33% of budget per EA</option>
               <option value="0.25">25% of budget per EA</option>
               <option value="0.2">20% of budget per EA</option>
               <option value="0.1">10% of budget per EA</option>
+              <option value="25">No cap - pure max profit</option>
             </select>
-            <span className="block text-[11px] text-slate-500 font-mono mt-1">stops the solver piling the budget into one EA</span>
+            <span className="block text-[11px] text-slate-500 font-mono mt-1">
+              worst dip a single EA may have on its own
+            </span>
           </label>
 
           <div className="block">
@@ -511,8 +514,22 @@ export const RiskBrain = ({ model, start, baselinePortfolio }) => {
         <table className="w-full min-w-[1080px]">
           <thead className="border-b border-slate-800">
             <tr>
-              {["Strategy", "Lots now → suggested", "Action", "Profit now → after", "Max DD alone now → after", "Drawdown share", ""].map((h, i) => (
-                <th key={h + i} className={`qf-label py-3 px-3 font-medium ${i === 0 ? "text-left" : i === 6 ? "" : "text-right"}`}>{h}</th>
+              {[
+                "Strategy",
+                "Lots now → suggested",
+                "Action",
+                "Profit now → after",
+                { label: "Worst dip alone now → after", title: "That strategy's OWN worst peak-to-trough dip if it traded by itself at that lot. It is not additive - the drawdown budget applies to the combined curve, and other strategies may be making money during this one's bad stretch." },
+                { label: "Share of combined DD", title: "How much of the portfolio's worst window this strategy contributes. These add up exactly to the combined drawdown, so the budget is checked against their sum, not against any single row." },
+                "",
+              ].map((h, i) => (
+                <th
+                  key={(h?.label || h) + i}
+                  title={h?.title}
+                  className={`qf-label py-3 px-3 font-medium ${i === 0 ? "text-left" : i === 6 ? "" : "text-right"} ${h?.title ? "cursor-help" : ""}`}
+                >
+                  {h?.label || h}
+                </th>
               ))}
             </tr>
           </thead>
@@ -544,7 +561,10 @@ export const RiskBrain = ({ model, start, baselinePortfolio }) => {
                     title="This strategy's own worst drawdown if it traded alone at that lot - the portfolio drawdown is smaller because different strategies peak at different times">
                     <span className="text-slate-500">{money(e.beforeDD)}</span>
                     <span className="text-slate-600 mx-1.5">→</span>
-                    <span className={e.standaloneDD > 0 ? "text-slate-300" : "text-slate-500"}>{money(e.standaloneDD)}</span>
+                    <span className={e.standaloneDD > shown.effectiveBudget + 1e-6 ? "text-amber-300 font-semibold" : e.standaloneDD > 0 ? "text-slate-300" : "text-slate-500"}>
+                      {money(e.standaloneDD)}
+                      {e.standaloneDD > shown.effectiveBudget + 1e-6 ? " ⚠" : ""}
+                    </span>
                   </td>
                   <td className="py-3 px-3 text-right">
                     <div className="flex items-center justify-end gap-2">
@@ -582,16 +602,40 @@ export const RiskBrain = ({ model, start, baselinePortfolio }) => {
                 <span className="text-slate-600 mx-1.5">→</span>
                 <span className={shown.profit >= 0 ? "text-emerald-400" : "text-red-400"}>{money(shown.profit)}</span>
               </td>
-              <td className="py-3 px-3 text-right font-mono text-xs whitespace-nowrap">
-                <span className="text-slate-500">{money(before.dd)}</span>
-                <span className="text-slate-600 mx-1.5">→</span>
-                <span className={over ? "text-red-400" : "text-emerald-400"}>{money(shown.dd)}</span>
+              <td className="py-3 px-3 text-right font-mono text-[10px] text-slate-600" title="These are per-strategy dips and do not add up - the combined drawdown is in the next column">
+                not additive
               </td>
               <td className="py-3 px-3 text-right font-mono text-xs text-red-400">{money(shown.dd)}</td>
               <td className="py-3 px-3" />
             </tr>
           </tfoot>
         </table>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 text-[11px] leading-relaxed">
+          <p className="text-slate-500">
+            <span className="text-slate-300">&ldquo;Worst dip alone&rdquo; is not the budget check:</span> that number is one
+            strategy&rsquo;s own peak-to-trough dip. Your {money(shown.effectiveBudget)} limit applies to the <span className="text-slate-300">combined</span> curve,
+            so it only sees the sum of the shares - which is exactly{" "}
+            <span className={over ? "text-red-400" : "text-emerald-400"}>{money(shown.dd)}</span>.
+          </p>
+          <p className="text-slate-500">
+            If every EA drew down at the same moment you would see{" "}
+            <span className="text-slate-300">{money(shown.worstCaseDD)}</span>. That is why the shares can sum to the budget while
+            individual rows sit above or below their true standalone risk.
+          </p>
+        </div>
+        {shown.overBudget.length > 0 && (
+          <div data-testid="standalone-warning" className="mt-3 flex items-start gap-2 border border-amber-500/40 bg-amber-500/5 px-3 py-2">
+            <AlertTriangle className="h-3.5 w-3.5 text-amber-400 mt-0.5 shrink-0" />
+            <p className="text-[11px] text-amber-200/90 leading-relaxed">
+              <span className="font-semibold">{shown.overBudget.map((e) => e.name).join(", ")}</span>{" "}
+              {shown.overBudget.length === 1 ? "can" : "can each"} draw down more than your whole{" "}
+              {money(shown.effectiveBudget)} budget on {shown.overBudget.length === 1 ? "its" : "their"} own - worst is{" "}
+              <span className="font-semibold">{shown.maxStandaloneEa?.name}</span> at {money(shown.maxStandalone)}. The combined curve still
+              stays inside the budget because other strategies were making money during that stretch, but if they are flat next time this
+              alone would breach it. Set <span className="text-amber-100">Max risk per EA</span> to 100% so no single strategy can.
+            </p>
+          </div>
+        )}
       </section>
 
       {/* --------------------------------------------- month-by-month P&L */}

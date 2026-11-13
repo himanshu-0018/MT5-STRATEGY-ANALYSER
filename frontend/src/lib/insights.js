@@ -67,6 +67,17 @@ export function buildInsights({ model, plan, baseline, mc, budget, start, lotSte
       `Running at the backtest lot sizes implies ${money(baseline.dd)} of drawdown, but your budget is ${money(budget)}. The plan cuts the book to ${plan.totalLots.toFixed(2)} lots to keep the worst historical dip inside the budget.`);
   }
 
+  /* ---- a single EA whose own dip exceeds the whole budget -------------- */
+  if (plan.overBudget && plan.overBudget.length) {
+    const worst = plan.maxStandaloneEa;
+    const names = plan.overBudget.map((e) => nm(e.name, 26)).join(", ");
+    push(
+      "warn",
+      `${nm(worst?.name || names, 30)} can dip more than your whole budget on its own`,
+      `Your ${money(plan.effectiveBudget)} limit is checked against the combined curve, which is ${money(plan.dd)} because other strategies were earning during that stretch. But ${nm(worst?.name || "", 40)}'s own worst peak-to-trough is ${money(plan.maxStandalone)} - if the rest are flat next time, that one EA breaches the budget by itself. Set "Max risk per EA" to 100% so no single strategy can ever exceed it.`,
+    );
+  }
+
   /* ---- the "same risk, better mix" argument --------------------------- */
   if (baseline.dd > plan.effectiveBudget && baseline.atBudgetProfit > 0) {
     const uplift = plan.profit - baseline.atBudgetProfit;

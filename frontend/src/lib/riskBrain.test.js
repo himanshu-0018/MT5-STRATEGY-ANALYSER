@@ -292,3 +292,66 @@ describe("per-strategy verdicts", () => {
     expect(total).toBe(model.eas.length);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* per-strategy drawdown cap                                          */
+/* ------------------------------------------------------------------ */
+
+describe("per-strategy drawdown cap", () => {
+  // A perfectly hedged pair: EA A loses while EA B wins, so the COMBINED
+  // curve barely dips while each one alone has a big peak-to-trough. This is
+  // exactly the case where an EA's own dip can dwarf the whole budget.
+  const t = (h) => Date.UTC(2024, 0, 1, h);
+  const legs = (nets) =>
+    nets.map((net, i) => ({ time: t(i), net, volume: 1, isOut: true, symbol: "XAUUSD", direction: "out", type: "sell", price: 100 }));
+  const a = { id: "a", expert: "Alpha", symbol: "XAUUSD", deals: legs([-100, -100, -100, 100, 100, 100, 100, 100]) };
+  const b = { id: "b", expert: "Beta", symbol: "XAUUSD", deals: legs([100, 100, 100, -40, -40, -40, -40, -40]) };
+  const model = buildRiskModel([a, b]);
+
+  test("the pair really is hedged: combined drawdown far below each leg", () => {
+    const each = model.eas.map((e) => e.ddPerLot);
+    expect(each[0]).toBeCloseTo(300, 6);
+    expect(each[1]).toBeCloseTo(200, 6);
+    const flat = evaluatePlan(model, [1, 1]).dd;
+    expect(flat).toBeLessThan(1e-6);
+  });
+
+  test("by default no single EA may dip past the budget on its own", () => {
+    const plan = buildPlan(model, { budget: 200, mode: "maxprofit" });
+    for (const e of plan.perEa) {
+      expect(e.standaloneDD).toBeLessThanOrEqual(plan.effectiveBudget + 1e-6);
+    }
+    expect(plan.overBudget).toHaveLength(0);
+  });
+
+  test("a 25% cap keeps every EA inside a quarter of the budget", () => {
+    const plan = buildPlan(model, { budget: 200, mode: "maxprofit", riskCap: 0.25 });
+    for (const e of plan.perEa) {
+      expect(e.standaloneDD).toBeLessThanOrEqual(200 * 0.25 + 1e-6);
+    }
+  });
+
+  test("removing the cap lets a hedged EA run past the budget, and the plan says so", () => {
+    const capped = buildPlan(model, { budget: 200, mode: "maxprofit" });
+    const free = buildPlan(model, { budget: 200, mode: "maxprofit", riskCap: 25 });
+    expect(free.overBudget.length).toBeGreaterThan(0);
+    expect(free.maxStandalone).toBeGreaterThan(free.effectiveBudget);
+    expect(free.maxStandaloneEa).not.toBeNull();
+    expect(free.profit).toBeGreaterThan(capped.profit);
+  });
+
+  test("the combined drawdown stays legal whatever the cap", () => {
+    for (const riskCap of [1, 0.5, 0.25, 0.1, 25]) {
+      const plan = buildPlan(model, { budget: 200, mode: "maxprofit", riskCap });
+      expect(plan.dd).toBeLessThanOrEqual(200 + 1e-6);
+    }
+  });
+
+  test("on the real reports the default cap bounds every standalone dip", () => {
+    const model2 = buildRiskModel(reports);
+    for (const budget of [50, 200, 1000]) {
+      const plan = buildPlan(model2, { budget, mode: "maxprofit" });
+      for (const e of plan.perEa) expect(e.standaloneDD).toBeLessThanOrEqual(budget + 1e-6);
+    }
+  });
+});

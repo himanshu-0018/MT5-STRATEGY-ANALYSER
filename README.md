@@ -37,8 +37,9 @@ That single property is enough to answer the sizing question **exactly**:
   list reconciles exactly with the calendar cell
 
 ### Lot Brain — position sizing optimiser
-- **Drawdown budget** in $ or % of the account, optional risk buffer, per-strategy risk cap,
-  broker lot step / minimum lot, max lots per strategy
+- **Drawdown budget** in $ or % of the account, optional risk buffer, per-strategy risk cap
+  (default: no single EA may draw down more than the whole budget on its own), broker lot step /
+  minimum lot, max lots per strategy
 - **Per-strategy verdict: `RAISE` / `CUT` / `KEEP` / `DROP`**, each with a numeric reason, e.g.
   *"One 0.01 lot takes drawdown to $207.02 — $7.02 over your limit (it would add $381.23 of profit)"*
 - **Before vs after**: net profit, max drawdown, profit per $1 of drawdown and total lots — now vs

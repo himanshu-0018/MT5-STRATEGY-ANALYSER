@@ -228,16 +228,20 @@ export function evaluatePlan(model, lots) {
 /* optimisers                                                                 */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Most this strategy may be sized to, in lots.
+ *
+ * `perLot` is the lot size at which the strategy's OWN worst peak-to-trough dip
+ * equals the whole budget. `riskCap` scales that: 1 = "no single EA may ever
+ * draw down more than the budget on its own", 0.25 = "not more than a quarter
+ * of it", 25 = no cap (pure max-profit; the LP only constrains the combined
+ * curve).
+ */
 function capFor(model, budget, i, maxLot, riskCap = 1) {
   const ea = model.eas[i];
   if (!(ea.ddPerLot > budget * 1e-6)) return maxLot;
   const perLot = budget / ea.ddPerLot;
-  // 25x headroom over the strategy's own drawdown keeps the LP bounded; the
-  // optional cap says "this strategy may not be sized as if it were the whole
-  // book", which is what stops the optimiser piling everything into one EA.
-  const hard = 25 * perLot;
-  const soft = riskCap < 1 ? riskCap * perLot : Infinity;
-  return Math.max(1e-9, Math.min(maxLot, hard, soft));
+  return Math.max(1e-9, Math.min(maxLot, riskCap * perLot));
 }
 
 function capsFor(model, budget, maxLot, blocked, riskCap = 1) {
@@ -443,7 +447,11 @@ export function buildPlan(model, opts) {
   } else {
     raw = maxProfitLots(model, effectiveBudget, w).lots;
   }
-  raw = raw.map((v, i) => (blocked && blocked[i] ? 0 : riskCap < 1 ? Math.min(v, cap[i]) : v));
+  raw = raw.map((v, i) => {
+    if (blocked && blocked[i]) return 0;
+    // a hand-edited plan is the user's call; optimiser output respects the cap
+    return mode === "custom" ? v : Math.min(v, cap[i]);
+  });
 
   let lots = raw.map((v) => Math.max(0, roundDown(v, lotStep)));
   let ev = evaluatePlan(model, lots);
@@ -535,6 +543,10 @@ export function buildPlan(model, opts) {
     };
   });
 
+  const maxStandalone = perEa.reduce((mx, e) => Math.max(mx, e.standaloneDD), 0);
+  const maxStandaloneEa = perEa.reduce((worst, e) => (e.standaloneDD > (worst?.standaloneDD ?? -1) ? e : worst), null);
+  const overBudget = perEa.filter((e) => e.standaloneDD > effectiveBudget + 1e-6);
+
   const totalProfit = perEa.reduce((s, e) => s + e.profit, 0);
   if (lots.every((v) => v === 0) && effectiveBudget > 0) {
     warnings.push("Budget too small for even the smallest lot step on the best strategy.");
@@ -593,6 +605,9 @@ export function buildPlan(model, opts) {
     reductions,
     keeps,
     riskCap,
+    maxStandalone,
+    maxStandaloneEa,
+    overBudget,
     activeCount: perEa.filter((e) => e.lot > 0).length,
     worstCaseDD: perEa.reduce((s, e) => s + e.standaloneDD, 0),
     frontierSlope: ev.dd > 0 ? totalProfit / ev.dd : 0,
