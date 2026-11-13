@@ -45,6 +45,8 @@ That single property is enough to answer the sizing question **exactly**:
   optimised — including the "shrink the same book until it fits" baseline the reallocation has to beat
 - Nothing below the broker minimum lot is ever suggested: a strategy that cannot be funded at
   0.01 lots is marked **DROP**, never resized below the minimum
+- **Month-by-month P&L**, current lots vs recommended lots, as grouped bars and a table with the
+  change and % change per month (totals reconcile with the headline before/after)
 - **Risk attribution** of the worst window (additive; negative = a strategy that hedges the book)
 - **Efficient frontier** comparing max-profit, uniform-scale and equal-risk sizing at the same budget
 - **Monte Carlo** block bootstrap over the joint daily P&L (400 reshuffled histories, all strategies

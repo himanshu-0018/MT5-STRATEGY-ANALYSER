@@ -21,6 +21,7 @@ import { buildPortfolio, money } from "../lib/portfolio";
 import { buildPlan, efficientFrontier, monteCarlo, scaleReports, fmtLot } from "../lib/riskBrain";
 import { buildInsights } from "../lib/insights";
 import { PlanEquityChart, FrontierChart, MonteCarloChart } from "./BrainCharts";
+import { MonthlyCompare } from "./MonthlyCompare";
 
 const MODES = [
   { key: "maxprofit", label: "Max profit", hint: "Solve for the exact combination that earns the most inside the budget" },
@@ -592,6 +593,9 @@ export const RiskBrain = ({ model, start, baselinePortfolio }) => {
           </tfoot>
         </table>
       </section>
+
+      {/* --------------------------------------------- month-by-month P&L */}
+      <MonthlyCompare beforeMonths={baselinePortfolio?.months} afterMonths={planPortfolio?.months} />
 
       {/* --------------------------------------------------------- insights */}
       <section className="space-y-3">

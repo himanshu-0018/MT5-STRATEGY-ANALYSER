@@ -37,7 +37,9 @@ Tab `Lot brain` (`components/RiskBrain.jsx`, charts in `components/BrainCharts.j
 - Efficient-frontier chart (max profit / uniform / equal risk at the same budget), equity chart at the planned lots vs the original backtest, risk attribution of the worst window (additive, can be negative for hedges).
 - Monte Carlo: block bootstrap over the joint calendar-day P&L matrix (all strategies resampled on the same days, so correlation is kept), 400 sims, intraday-adjusted; p50/p90/p95/worst, breach probability, and a "95% safe sizing" button that re-sizes through the risk buffer.
 - Copy-plan export (tab separated, includes DO NOT TRADE rows).
+- Monthly P&L comparison (`components/MonthlyCompare.jsx`): every month of the backtest re-priced at both the current backtest lots and the recommended lots, as grouped bars plus a table (month, current, optimised, change, change %, mini before/after bars, trades). `mergeMonthly()` in `lib/portfolio.js` lines the two month sets up; the totals reconcile with the before/after hero (verified: sum of monthly = plan profit).
 - Trade list tests: `src/lib/trades.test.js` (entry/exit pairing, FIFO for concurrent positions, partial closes, unmatched closes, close-day grouping, and on the real MT5 samples: paired P&L equals the sum of every deal, plus per-day reconciliation with the calendar).
+- `src/lib/portfolio.test.js` covers `mergeMonthly` (chronology, one-sided months, sign-safe % change) and monthly totals vs portfolio net.
 - Tests: `src/lib/riskBrain.test.js` (LP vs random search optimality, homogeneity, budget compliance, verdicts, minimum lot, MC determinism) and `src/lib/sample.integration.test.js` (parses the bundled MT5 samples end to end).
 
 ## Backlog

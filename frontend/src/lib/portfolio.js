@@ -151,4 +151,32 @@ export function reportSummary(r) {
   return { ...s, dd, from: r.deals[0].time, to: r.deals[r.deals.length - 1].time };
 }
 
+/**
+ * Line up two sets of monthly buckets (the current backtest lots and the
+ * optimised lots) so a month-by-month comparison can be rendered. Months are
+ * keyed "YYYY-MM" and the result is chronological.
+ */
+export function mergeMonthly(beforeMonths = [], afterMonths = []) {
+  const before = new Map(beforeMonths.map((m) => [m.key, m]));
+  const after = new Map(afterMonths.map((m) => [m.key, m]));
+  const keys = [...new Set([...before.keys(), ...after.keys()])].sort();
+  return keys.map((key) => {
+    const b = before.get(key);
+    const a = after.get(key);
+    const beforeTotal = b?.total ?? 0;
+    const afterTotal = a?.total ?? 0;
+    const change = afterTotal - beforeTotal;
+    return {
+      key,
+      before: beforeTotal,
+      after: afterTotal,
+      change,
+      changePct: beforeTotal !== 0 ? (change / Math.abs(beforeTotal)) * 100 : null,
+      trades: b?.trades ?? a?.trades ?? 0,
+      beforeTrades: b?.trades ?? 0,
+      afterTrades: a?.trades ?? 0,
+    };
+  });
+}
+
 export const REPORT_COLORS = ["#06B6D4", "#F59E0B", "#A78BFA", "#F472B6", "#34D399", "#FB923C", "#60A5FA", "#E879F9"];
