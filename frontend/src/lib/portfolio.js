@@ -1,3 +1,5 @@
+import { pairTrades, tradesByCloseDay } from "./trades";
+
 const pad = (n) => String(n).padStart(2, "0");
 export const fmtDate = (t) => {
   const d = new Date(t);
@@ -54,6 +56,8 @@ export function drawdownWalk(events, start) {
 }
 
 export function buildPortfolio(reports, start) {
+  const trades = pairTrades(reports);
+  const tradesByDay = tradesByCloseDay(trades);
   const events = [];
   reports.forEach((r, ri) => r.deals.forEach((d) => events.push({ ...d, report: r.expert, ri })));
   events.sort((a, b) => a.time - b.time);
@@ -125,6 +129,8 @@ export function buildPortfolio(reports, start) {
 
   return {
     events,
+    trades,
+    tradesByDay,
     stats,
     curve,
     dd,

@@ -31,6 +31,10 @@ That single property is enough to answer the sizing question **exactly**:
 - Combined KPIs with the real peak/trough timestamps
 - Combined balance curve + underwater chart, worst-drawdown window with every deal
 - FTMO-style profit calendar (days/weeks, $ or % of balance), monthly matrix and worst-day rankings
+- Click any calendar day for the **full trade list**: open/close time and price, time held, EA, side,
+  lots, P&L per trade, SL/TP tags, a by-EA filter and the day's best/worst trade. Deals are paired
+  back into trades (FIFO per symbol, partial closes split, commissions allocated pro rata) so the
+  list reconciles exactly with the calendar cell
 
 ### Lot Brain — position sizing optimiser
 - **Drawdown budget** in $ or % of the account, optional risk buffer, per-strategy risk cap,

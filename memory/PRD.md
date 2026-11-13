@@ -21,6 +21,10 @@ Frontend-only React. `lib/mt5Parser.js` (UTF-16/UTF-8 decode, DOMParser, Deals t
 - $ / % toggle per day (day P&L vs. % of the balance at day open), month navigation across the whole uploaded range + month picker, monthly totals strip (net, trading days, trades, best/worst/avg day, win-day rate), click a day to list its deals with timestamps
 
 
+## Implemented (2026-11) – Calendar day trade list
+Clicking any day in the Profit Calendar (days grid or a week's day chips) opens `components/DayTradesModal.jsx`, a full trade list for that day: date + weekday, day P&L, closed trades with W/L split, total volume, a "by EA" filter row with per-EA contribution, best/worst trade and % of balance, and a sortable table of #/opened/closed/held/EA/symbol/side/lots/open→close price/P&L. SL/TP tags come from the exit deal comment, and trades opened on an earlier day show the date. Esc, the X and the backdrop all close it, with body scroll locked while open.
+`lib/trades.js` pairs the raw deals back into trades (`pairTrades`): a per-report FIFO per symbol matches each "out" deal to the earliest open "in" deal of the opposite side, splits partial closes and allocates entry commission pro rata, and keeps unmatched closes (reversals / positions opened before the report window) flagged as incomplete so the day still reconciles. `tradesByCloseDay` groups them by close day and `buildPortfolio` exposes `trades` + `tradesByDay`. The footer states whether the day matches the calendar cell, or shows the small difference when an entry commission lands on another day.
+
 ## Implemented (2026-11) – Risk Brain (position sizing)
 Tab `Lot brain` (`components/RiskBrain.jsx`, charts in `components/BrainCharts.jsx`).
 - Normalises every report to P&L per 1.00 lot so profit and drawdown scale linearly with lot size; all deals are replayed on one merged timeline (`lib/riskBrain.js`).
@@ -33,6 +37,7 @@ Tab `Lot brain` (`components/RiskBrain.jsx`, charts in `components/BrainCharts.j
 - Efficient-frontier chart (max profit / uniform / equal risk at the same budget), equity chart at the planned lots vs the original backtest, risk attribution of the worst window (additive, can be negative for hedges).
 - Monte Carlo: block bootstrap over the joint calendar-day P&L matrix (all strategies resampled on the same days, so correlation is kept), 400 sims, intraday-adjusted; p50/p90/p95/worst, breach probability, and a "95% safe sizing" button that re-sizes through the risk buffer.
 - Copy-plan export (tab separated, includes DO NOT TRADE rows).
+- Trade list tests: `src/lib/trades.test.js` (entry/exit pairing, FIFO for concurrent positions, partial closes, unmatched closes, close-day grouping, and on the real MT5 samples: paired P&L equals the sum of every deal, plus per-day reconciliation with the calendar).
 - Tests: `src/lib/riskBrain.test.js` (LP vs random search optimality, homogeneity, budget compliance, verdicts, minimum lot, MC determinism) and `src/lib/sample.integration.test.js` (parses the bundled MT5 samples end to end).
 
 ## Backlog

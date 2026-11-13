@@ -13,7 +13,7 @@ import {
   shiftMonth,
   toneOf,
 } from "../lib/calendar";
-import { DealList } from "./WorstDays";
+import { DayTradesModal } from "./DayTradesModal";
 
 const Seg = ({ options, value, onChange, testId, label }) => (
   <div className="flex items-stretch border border-slate-700">
@@ -420,32 +420,17 @@ export const ProfitCalendar = ({ p, colorOf }) => {
         />
       </div>
 
-      {/* ── selected day drill-down ────────────────────────────────────────── */}
+      {/* ── selected day: every trade closed that day ──────────────────────── */}
       {selectedDay && (
-        <div data-testid="calendar-day-detail" className="mt-4 border border-slate-800">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 bg-slate-900/70 px-3 py-2">
-            <span className="font-mono text-xs text-slate-100">
-              {selectedDay.day} <span className="text-slate-500">· {selectedDay.deals.length} deals</span>
-            </span>
-            <span className="flex items-center gap-3 font-mono text-[11px] text-slate-400">
-              <span className={toneOf(selectedDay.total)}>P&L {money(selectedDay.total, true)}</span>
-              <span>{shortPct(selectedDay.pct)}</span>
-              <span>
-                {selectedDay.trades} trades · W{selectedDay.wins}/L{selectedDay.losses}
-              </span>
-              <span>balance {money(selectedDay.balanceEnd)}</span>
-              <button
-                type="button"
-                data-testid="calendar-day-detail-close"
-                onClick={() => setSelected(null)}
-                className="text-slate-500 transition-colors hover:text-cyan-300"
-              >
-                close
-              </button>
-            </span>
-          </div>
-          <DealList deals={selectedDay.deals} colorOf={colorOf} />
-        </div>
+        <DayTradesModal
+          dayKey={selectedDay.key}
+          trades={p.tradesByDay?.get?.(selectedDay.key) || []}
+          day={selectedDay}
+          cellTotal={selectedDay.total}
+          balanceAtOpen={selectedDay.balanceStart}
+          onClose={() => setSelected(null)}
+          colorOf={colorOf}
+        />
       )}
     </div>
   );
