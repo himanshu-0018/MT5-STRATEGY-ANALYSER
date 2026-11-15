@@ -16,6 +16,14 @@ const load = (name) => {
 describe("real MT5 reports", () => {
   const reports = [load("dynamic.html"), load("smc.html")];
 
+  test("reports are labelled by their file name, EA name kept separately", () => {
+    expect(reports[0].label).toBe("dynamic");
+    expect(reports[0].expert).toBe("dynamic");
+    expect(reports[0].eaExpert).toMatch(/Dynamic Liquidity/i);
+    expect(reports[1].label).toBe("smc");
+    expect(reports[1].eaExpert).toMatch(/SMC/i);
+  });
+
   test("parses both samples into deals", () => {
     for (const r of reports) {
       expect(r.deals.length).toBeGreaterThan(50);

@@ -1,5 +1,6 @@
 import { solveLP } from "./simplex";
 import {
+  RiskModelTooLargeError,
   buildRiskModel,
   evaluatePlan,
   maxProfitLots,
@@ -353,5 +354,28 @@ describe("per-strategy drawdown cap", () => {
       const plan = buildPlan(model2, { budget, mode: "maxprofit" });
       for (const e of plan.perEa) expect(e.standaloneDD).toBeLessThanOrEqual(budget + 1e-6);
     }
+  });
+});
+
+
+describe("scale guard", () => {
+  test("refuses a book too large to size instead of freezing the tab", () => {
+    // 200 reports x 200 unique deal times = 8M cells, over the 4M limit
+    const big = Array.from({ length: 200 }, (_, i) =>
+      makeReport({ id: `big${i}`, n: 200, seed: 1000 + i, offset: i * 37, volume: 0.1 }),
+    );
+    expect(() => buildRiskModel(big)).toThrow(RiskModelTooLargeError);
+    try {
+      buildRiskModel(big);
+    } catch (err) {
+      expect(err.info.reports).toBe(200);
+      expect(err.info.cells).toBeGreaterThan(err.info.max);
+      expect(err.info.maxReports).toBeGreaterThanOrEqual(2);
+      expect(err.info.maxReports).toBeLessThan(200);
+    }
+  });
+
+  test("a normal-sized book is unaffected", () => {
+    expect(() => buildRiskModel(reports)).not.toThrow();
   });
 });

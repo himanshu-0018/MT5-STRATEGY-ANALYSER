@@ -540,7 +540,7 @@ export const RiskBrain = ({ model, start, baselinePortfolio }) => {
                 <tr key={e.id} data-testid={`lot-plan-row-${i}`}
                   className={`border-b border-slate-800/60 hover:bg-slate-800/30 transition-colors ${e.action === "drop" ? "opacity-55" : ""}`}>
                   <td className="py-3 px-3">
-                    <div className="text-sm text-slate-100 truncate max-w-[250px]" title={e.name}>{e.name}</div>
+                    <div className="text-sm text-slate-100 truncate max-w-[250px]" title={e.eaExpert ? `${e.name} · EA: ${e.eaExpert}` : e.name}>{e.name}</div>
                     <div className="text-[11px] text-slate-500 font-mono mt-0.5">{e.symbol} · {e.trades} trades</div>
                   </td>
                   <td className="py-3 px-3 text-right font-mono text-xs whitespace-nowrap">

@@ -22,9 +22,11 @@ export const ReportTable = ({ reports, summaries, enabled, onToggle, onRemove })
               <C className="font-sans text-sm text-slate-100">
                 <div className="flex items-center gap-2">
                   <span className="h-2 w-2 shrink-0" style={{ background: REPORT_COLORS[i % REPORT_COLORS.length] }} />
-                  <span className="truncate max-w-[260px]" title={r.expert}>{r.expert}</span>
+                  <span className="truncate max-w-[260px]" title={r.eaExpert ? `${r.expert} · EA: ${r.eaExpert}` : r.expert}>{r.expert}</span>
                 </div>
-                <div className="text-[11px] text-slate-500 font-mono mt-0.5 truncate max-w-[260px]">{r.fileName}</div>
+                <div className="text-[11px] text-slate-500 font-mono mt-0.5 truncate max-w-[260px]">
+                  {r.eaExpert ? `EA: ${r.eaExpert}` : r.fileName}
+                </div>
               </C>
               <C>{r.symbol} · {r.timeframe}</C>
               <C className="text-slate-400">{fmtDate(s.from)} → {fmtDate(s.to)}</C>

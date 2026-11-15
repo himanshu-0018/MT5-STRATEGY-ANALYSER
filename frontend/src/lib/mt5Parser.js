@@ -27,6 +27,10 @@ const findValue = (cells, label) => {
 
 const OUT_DIRS = new Set(["out", "in/out", "out by"]);
 
+/** "btc_2024_fixed.html" -> "btc_2024_fixed" (what the trader sees in their folder) */
+export const reportLabel = (fileName) =>
+  String(fileName || "").replace(/^.*[\\/]/, "").replace(/\.[^.]+$/, "").trim();
+
 export function parseMt5Report(buffer, fileName) {
   const html = decode(buffer);
   const doc = new DOMParser().parseFromString(html, "text/html");
@@ -69,12 +73,18 @@ export function parseMt5Report(buffer, fileName) {
   if (!deals.length) throw new Error("No trade deals found in report.");
   deals.sort((a, b) => a.time - b.time);
 
-  const expert = findValue(cells, "Expert:") || fileName;
+  const eaExpert = findValue(cells, "Expert:") || "";
+  // Reports are identified by the file name the trader actually saved, not by
+  // the EA name inside the report (two files can be the same EA, and the file
+  // name is what they recognise). The EA name is kept for tooltips/subtitles.
+  const label = reportLabel(fileName) || eaExpert || fileName;
   const period = findValue(cells, "Period:") || "";
   return {
     id: `${fileName}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     fileName,
-    expert,
+    label,
+    expert: label,
+    eaExpert,
     symbol: findValue(cells, "Symbol:") || deals[0].symbol,
     period,
     timeframe: period.split(" ")[0],

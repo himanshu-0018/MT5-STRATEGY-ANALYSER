@@ -36,6 +36,22 @@ import { solveLP } from "./simplex";
 const EPS = 1e-9;
 const DAY = 86400000;
 
+/**
+ * The sizing model needs one cumulative P&L curve per report on a shared
+ * timeline, so memory is reports x timestamps. Past a few million cells the
+ * optimiser is both slow and pointless (nobody trades 500 EAs at once), so we
+ * refuse it with an explicit error instead of freezing the tab.
+ */
+export const RISK_MODEL_MAX_CELLS = 2_000_000;
+
+export class RiskModelTooLargeError extends Error {
+  constructor(info) {
+    super("Too many reports to size at once");
+    this.name = "RiskModelTooLargeError";
+    this.info = info;
+  }
+}
+
 export const roundDown = (v, step) => {
   if (!(step > 0)) return v;
   const n = Math.floor(v / step + 1e-9);
@@ -104,6 +120,7 @@ export function buildRiskModel(reports) {
     eas.push({
       id: r.id,
       name: r.expert,
+      eaExpert: r.eaExpert || "",
       symbol: r.symbol,
       refLot,
       trades: deals.filter((d) => d.isOut).length,
@@ -114,6 +131,17 @@ export function buildRiskModel(reports) {
 
   const times = Float64Array.from([...timeSet].sort((a, b) => a - b));
   const T = times.length;
+
+  const cells = T * eas.length;
+  if (cells > RISK_MODEL_MAX_CELLS) {
+    throw new RiskModelTooLargeError({
+      reports: eas.length,
+      timestamps: T,
+      cells,
+      max: RISK_MODEL_MAX_CELLS,
+      maxReports: Math.max(2, Math.floor(RISK_MODEL_MAX_CELLS / Math.max(T, 1))),
+    });
+  }
 
   for (const ea of eas) {
     const cum = new Float64Array(T);
@@ -521,6 +549,7 @@ export function buildPlan(model, opts) {
     return {
       id: e.id,
       name: e.name,
+      eaExpert: e.eaExpert,
       symbol: e.symbol,
       refLot,
       trades: e.trades,

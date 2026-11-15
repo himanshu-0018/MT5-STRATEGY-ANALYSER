@@ -1,10 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "@/App.css";
 import { Toaster, toast } from "sonner";
-import { FlaskConical, Eraser, LayoutDashboard, BrainCircuit } from "lucide-react";
+import { FlaskConical, Eraser, LayoutDashboard, BrainCircuit, Loader2, AlertTriangle } from "lucide-react";
 import { parseMt5Report } from "./lib/mt5Parser";
 import { buildPortfolio, reportSummary, REPORT_COLORS } from "./lib/portfolio";
-import { buildRiskModel } from "./lib/riskBrain";
+import { buildRiskModel, RiskModelTooLargeError } from "./lib/riskBrain";
 import { Uploader } from "./components/Uploader";
 import { KpiGrid } from "./components/KpiGrid";
 import { EquityChart } from "./components/EquityChart";
@@ -13,6 +13,10 @@ import { MonthlyTable } from "./components/MonthlyTable";
 import { WorstDays, DrawdownWindow } from "./components/WorstDays";
 import { ProfitCalendar } from "./components/ProfitCalendar";
 import { RiskBrain } from "./components/RiskBrain";
+import { UploadProgressHost } from "./components/UploadProgress";
+import { uploadProgress } from "./lib/uploadProgress";
+
+const yieldToBrowser = () => new Promise((r) => setTimeout(r, 0));
 
 const SAMPLES = ["dynamic.html", "smc.html"];
 
@@ -35,12 +39,40 @@ function App() {
   };
 
   const handleFiles = async (files) => {
-    const out = [];
-    for (const f of files) {
-      try { out.push(parseMt5Report(await f.arrayBuffer(), f.name)); }
-      catch (err) { toast.error(`${f.name}: ${err.message}`); }
+    const list = Array.from(files || []);
+    if (!list.length) return;
+    const parsed = [];
+    let failed = 0;
+    let firstError = "";
+    uploadProgress.start(list.length);
+    let cancelled = false;
+    try {
+      for (let i = 0; i < list.length; i++) {
+        if (uploadProgress.isCancelled()) { cancelled = true; break; }
+        const f = list[i];
+        uploadProgress.update({ current: f.name, phase: "parsing" });
+        await yieldToBrowser(); // let the overlay paint before the parse blocks the thread
+        try {
+          parsed.push(parseMt5Report(await f.arrayBuffer(), f.name));
+        } catch (err) {
+          failed += 1;
+          if (!firstError) firstError = `${f.name}: ${err.message}`;
+        }
+        uploadProgress.update({ done: i + 1, failed });
+        if (i % 6 === 5) await yieldToBrowser();
+      }
+
+      if (parsed.length) {
+        uploadProgress.setPhase("building");
+        await yieldToBrowser();
+        addParsed(parsed); // heavy: merges every deal into the portfolio
+        await yieldToBrowser();
+      }
+    } finally {
+      uploadProgress.finish();
     }
-    addParsed(out);
+    if (failed) toast.error(`${failed} file${failed === 1 ? "" : "s"} could not be read${firstError ? ` — ${firstError}` : ""}`);
+    if (cancelled) toast(`Cancelled - kept ${parsed.length} report${parsed.length === 1 ? "" : "s"}`);
   };
 
   const loadSamples = async () => {
@@ -57,12 +89,39 @@ function App() {
   const active = reports.filter((r) => enabled[r.id]).map((r) => ({ ...r, ci: colorIdx[r.id] }));
   const start = parseFloat(balance) || 0;
   const portfolio = useMemo(() => (active.length ? buildPortfolio(active, start) : null), [reports, enabled, start]); // eslint-disable-line react-hooks/exhaustive-deps
-  const riskModel = useMemo(() => (active.length ? buildRiskModel(active) : null), [reports, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The sizing model is a T x EAs matrix of cumulative P&L, so building it for
+  // hundreds of reports is expensive. Only do it when the brain is actually on
+  // screen, and cache it until the report set changes.
+  const [riskModel, setRiskModel] = useState(null);
+  const [brainBusy, setBrainBusy] = useState(false);
+  const [modelError, setModelError] = useState(null);
+  const modelCache = useRef({ key: null, model: null });
+  const activeKey = active.map((r) => r.id).join("|");
+  useEffect(() => {
+    if (tab !== "brain" || !active.length) { setRiskModel(null); setBrainBusy(false); return; }
+    if (modelCache.current.key === activeKey) { setRiskModel(modelCache.current.model); setBrainBusy(false); return; }
+    setBrainBusy(true);
+    setModelError(null);
+    const h = setTimeout(() => {
+      try {
+        const m = buildRiskModel(active);
+        modelCache.current = { key: activeKey, model: m };
+        setRiskModel(m);
+      } catch (err) {
+        if (err instanceof RiskModelTooLargeError) setModelError(err.info);
+        else setModelError({ message: err.message });
+      } finally {
+        setBrainBusy(false);
+      }
+    }, 40);
+    return () => clearTimeout(h);
+  }, [tab, activeKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const colorOf = (ri) => REPORT_COLORS[(active[ri]?.ci ?? 0) % REPORT_COLORS.length];
 
   return (
     <div className="qf-app min-h-screen">
       <Toaster theme="dark" position="bottom-right" />
+      <UploadProgressHost />
       <header data-testid="header-bar" className="sticky top-0 z-30 border-b border-slate-800 bg-[#0B0F19]/80 backdrop-blur-lg">
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center gap-4">
           <div className="flex items-baseline gap-3 mr-auto">
@@ -138,7 +197,48 @@ function App() {
               onRemove={(id) => setReports((r) => r.filter((x) => x.id !== id))} />
             {tab === "brain" ? (
               active.length ? (
-                <RiskBrain model={riskModel} start={start} baselinePortfolio={portfolio} />
+                modelError ? (
+                  <div data-testid="brain-too-large" className="qf-card border-l-2 border-l-amber-400 p-6">
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle className="h-4 w-4 text-amber-400 mt-0.5 shrink-0" />
+                      <div>
+                        <h2 className="font-heading text-base font-semibold text-slate-100">
+                          {modelError.reports ? "Too many reports to size at once" : "Could not build the sizing model"}
+                        </h2>
+                        {modelError.reports ? (
+                          <>
+                            <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
+                              The optimiser needs one cumulative P&amp;L curve per report on a shared timeline, so this book is{" "}
+                              <span className="font-mono text-slate-200">{modelError.reports.toLocaleString()} reports ×{" "}
+                              {modelError.timestamps.toLocaleString()} timestamps</span>
+                              {" "}= about {Math.round(modelError.cells / 1e6)} million numbers. That is past the point where it stays
+                              instantly usable in a browser.
+                            </p>
+                            <p className="mt-2 text-xs leading-relaxed text-slate-400">
+                              Turn some reports off in the <span className="text-slate-200">Use</span> column above - about{" "}
+                              <span className="font-mono text-cyan-300">{modelError.maxReports}</span> of these fit comfortably at this
+                              history length - and the plan will build right away.
+                            </p>
+                          </>
+                        ) : (
+                          <p className="mt-1.5 text-xs text-slate-400">{modelError.message}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : riskModel && !brainBusy ? (
+                  <RiskBrain model={riskModel} start={start} baselinePortfolio={portfolio} />
+                ) : (
+                  <div data-testid="brain-preparing" className="qf-card qf-rise flex items-center gap-3 p-6">
+                    <Loader2 className="h-4 w-4 animate-spin text-cyan-400" />
+                    <div>
+                      <div className="text-sm text-slate-200">Preparing the sizing model</div>
+                      <div className="qf-label mt-0.5">
+                        {active.length} report{active.length === 1 ? "" : "s"} · normalising every deal to P&amp;L per lot
+                      </div>
+                    </div>
+                  </div>
+                )
               ) : (
                 <p data-testid="no-active-reports-brain" className="text-sm text-slate-500">Enable at least one report to size the book.</p>
               )
