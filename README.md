@@ -142,8 +142,11 @@ How it stays fast:
 - **Month/day buckets** reuse cached keys instead of allocating a `Date` per deal.
 - **Trade pairing is lazy** - deals are paired only when a calendar day is opened.
 - **The equity curve is sampled** while walking (the chart only draws ~2,500 points).
-- **The Lot Brain model is built lazily**, cached, and capped so it can never hang
-  the tab; it sizes a subset of reports at a time.
+- **The Lot Brain sizes the whole book.** The model is sparse (one entry per
+  deal, not a reports x timestamps matrix), the cutting-plane LP is scaled and
+  prunes slack constraints, and the solved direction is cached - so a **342
+  report book** sizes in ~10 s and changing the budget afterwards takes ~1 s
+  (the LP vertex is budget-independent, so it is rescaled instead of re-solved).
 
 ## Quick start
 

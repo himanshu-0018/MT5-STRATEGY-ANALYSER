@@ -16,9 +16,10 @@ export const baselinePlan = (model) => {
  * What happens to drawdown and profit if we add exactly one lot step to one
  * strategy - the "next best trade" analysis behind lot sizing.
  */
-export function marginalSteps(model, lots, lotStep) {
+export function marginalSteps(model, lots, lotStep, only) {
   const out = [];
   model.eas.forEach((e, i) => {
+    if (only && !only.has(i)) return;
     const next = lots.map((v, j) => (j === i ? parseFloat((v + lotStep).toFixed(8)) : v));
     const ev = evaluatePlan(model, next);
     const profit = next.reduce((s, w, j) => s + w * model.eas[j].totalPerLot, 0);
@@ -154,7 +155,11 @@ export function buildInsights({ model, plan, baseline, mc, budget, start, lotSte
   }
 
   /* ---- next step ------------------------------------------------------ */
-  const steps = marginalSteps(model, plan.lots, lotStep)
+  // A 300-report book would need 300 full drawdown walks just to suggest the
+  // next lot step; the suggestion only ever comes from the biggest strategies.
+  const topIds = active.length > 40 ? new Set([...active].sort((a, b) => b.profit - a.profit).slice(0, 12).map((e) => e.id)) : null;
+  const only = topIds ? new Set(model.eas.map((e, i) => (topIds.has(e.id) ? i : -1)).filter((i) => i >= 0)) : null;
+  const steps = marginalSteps(model, plan.lots, lotStep, only)
     .filter((s) => s.deltaProfit > 0)
     .sort((a, b) => b.deltaProfit - a.deltaProfit);
   if (steps.length) {

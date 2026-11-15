@@ -21,6 +21,16 @@ Frontend-only React. `lib/mt5Parser.js` (UTF-16/UTF-8 decode, DOMParser, Deals t
 - $ / % toggle per day (day P&L vs. % of the balance at day open), month navigation across the whole uploaded range + month picker, monthly totals strip (net, trading days, trades, best/worst/avg day, win-day rate), click a day to list its deals with timestamps
 
 
+## Implemented (2026-11) – Lot Brain at 342 reports (no limit in practice)
+The dense `reports x timestamps` model (46M numbers for 342 reports) could not size the real book at all.
+- **Sparse model**: one event per deal on the shared timeline (`evStart/evEa/evPpl`) plus per-report `(group, cumulative)` arrays with binary-search lookup. Memory O(deals), evaluation O(deals) instead of O(reports x timestamps).
+- **Cutting plane**: now adds the deepest window from each of 10 timeline blocks per iteration (instead of one), works in cap-normalised units (`w = cap * u`, u in [0,1]) and normalises each cut row - the same LP, but the simplex stopped crawling: 73 s -> 5.9 s.
+- **Slack-cut pruning**: cuts that stop shaping the solution are dropped (a violated window is simply re-added), which keeps the LP small. Measured identical answer (profit 32,366 / DD 182.97) before and after pruning.
+- **Direction cache** (`WeakMap` per model): the LP is homogeneous in the budget, so changing the budget rescales the cached vertex (~1.3 s instead of ~6 s).
+- **Simplex**: the Bland's-rule fallback now only kicks in after 900 pivots instead of 150 (Dantzig legitimately needs more on 342 variables).
+- **Limits** raised to 1000 reports / 4M deals (from 2M cells), which no realistic book reaches.
+- Results on the real 344 files (342 usable): model 0.3 s, cold plan 6.7 s, budget change 1.3 s, frontier 27 ms, Monte Carlo 163 ms, insights 31 ms; UI 9.6 s end to end vs 121 s before.
+
 ## Implemented (2026-11) – real-world 344-report batch
 First tested with the user's actual export: 344 HTML reports, 728 MB, 170,934 trades, UTF-16, files up to 33 MB with 678k `<td>` cells.
 - `mt5Parser` rewritten: `scanReport()` scans the HTML string for the Deals section and stops at the Orders header, so no DOM is built for normal reports (DOM path kept as a fallback). Result: 5.0 s to load all 344 (was: unable to load 50) at 357 MB heap; trade total matches an independent count exactly (170,934).

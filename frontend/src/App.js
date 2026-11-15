@@ -4,7 +4,7 @@ import { Toaster, toast } from "sonner";
 import { FlaskConical, Eraser, LayoutDashboard, BrainCircuit, Loader2, AlertTriangle } from "lucide-react";
 import { parseMt5Report } from "./lib/mt5Parser";
 import { buildPortfolio, reportSummary, REPORT_COLORS } from "./lib/portfolio";
-import { buildRiskModel, RiskModelTooLargeError } from "./lib/riskBrain";
+import { buildRiskModel, buildPlan, RiskModelTooLargeError } from "./lib/riskBrain";
 import { Uploader } from "./components/Uploader";
 import { KpiGrid } from "./components/KpiGrid";
 import { EquityChart } from "./components/EquityChart";
@@ -114,6 +114,9 @@ function App() {
       try {
         const m = buildRiskModel(active);
         modelCache.current = { key: activeKey, model: m };
+        // Warm the solver with the default settings so the first render of the
+        // brain is a cache hit instead of a multi-second freeze.
+        try { buildPlan(m, { budget: 200, mode: "maxprofit", safety: 1, lotStep: 0.01, maxLot: 100 }); } catch (e) { /* optional */ }
         setRiskModel(m);
       } catch (err) {
         if (err instanceof RiskModelTooLargeError) setModelError(err.info);
@@ -220,17 +223,16 @@ function App() {
                         {modelError.reports ? (
                           <>
                             <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
-                              The optimiser needs one cumulative P&amp;L curve per report on a shared timeline, so this book is{" "}
-                              <span className="font-mono text-slate-200">{modelError.reports.toLocaleString()} reports ×{" "}
-                              {modelError.timestamps.toLocaleString()} timestamps</span>
-                              {" "}= about {Math.round(modelError.cells / 1e6)} million numbers. That is past the point where it stays
-                              instantly usable in a browser.
+                              This book has{" "}
+                              <span className="font-mono text-slate-200">{modelError.reports.toLocaleString()} reports ·{" "}
+                              {modelError.events.toLocaleString()} deals</span>
+                              {modelError.events > modelError.maxEvents
+                                ? ` - past the ${modelError.maxEvents.toLocaleString()}-deal ceiling for one sizing pass.`
+                                : ` - past the ${modelError.maxReports.toLocaleString()}-report ceiling for one sizing pass.`}
                             </p>
                             <p className="mt-2 text-xs leading-relaxed text-slate-400">
-                              Turn some reports off in the <span className="text-slate-200">Use</span> column above and the plan builds
-                              right away - about <span className="font-mono text-cyan-300">{modelError.maxReports}</span> of these fit at
-                              the current timeline length, and disabling reports also shortens that timeline, so the limit rises as you
-                              turn them off.
+                              Turn some reports off in the <span className="text-slate-200">Use</span> column above - the plan then
+                              builds right away. In practice this is only reached by a book far larger than anyone trades at once.
                             </p>
                           </>
                         ) : (

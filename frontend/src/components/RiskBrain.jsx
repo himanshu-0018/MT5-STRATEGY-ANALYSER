@@ -487,7 +487,7 @@ export const RiskBrain = ({ model, start, baselinePortfolio }) => {
             Keeping them sized would eat drawdown (or lose money outright) without buying enough profit. The budget they free goes to the strategies below.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2 mt-4">
-            {shown.drops.map((e) => (
+            {shown.drops.slice(0, shown.drops.length > 14 ? 12 : shown.drops.length).map((e) => (
               <div key={e.id} className="flex items-start gap-2 text-[12px]">
                 <span className="mt-1.5 h-1.5 w-1.5 shrink-0 bg-red-500" />
                 <div>
@@ -497,6 +497,11 @@ export const RiskBrain = ({ model, start, baselinePortfolio }) => {
               </div>
             ))}
           </div>
+          {shown.drops.length > 14 && (
+            <p className="mt-3 text-[11px] text-slate-500 font-mono">
+              showing 12 of {shown.drops.length} - every strategy and its reason is listed in the lot plan below.
+            </p>
+          )}
         </section>
       )}
 

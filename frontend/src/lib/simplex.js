@@ -81,8 +81,10 @@ export function solveLP(c, A, b, opts = {}) {
     pivot(leave, enter);
     basis[leave] = enter;
 
-    // Dantzig can cycle on degenerate problems - fall back to Bland's rule.
-    if (iter > 150) useBland = true;
+    // Dantzig can cycle on degenerate problems. Only fall back to Bland's rule
+    // when that actually happens - on a 300-variable LP Dantzig legitimately
+    // needs hundreds of pivots, and Bland is ~10x slower per pivot.
+    if (!useBland && iter > 900) useBland = true;
   }
 
   const x = new Array(n).fill(0);

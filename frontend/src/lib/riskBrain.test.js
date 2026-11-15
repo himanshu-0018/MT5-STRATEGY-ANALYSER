@@ -359,19 +359,32 @@ describe("per-strategy drawdown cap", () => {
 
 
 describe("scale guard", () => {
-  test("refuses a book too large to size instead of freezing the tab", () => {
-    // 200 reports x 200 unique deal times = 8M cells, over the 4M limit
-    const big = Array.from({ length: 200 }, (_, i) =>
-      makeReport({ id: `big${i}`, n: 200, seed: 1000 + i, offset: i * 37, volume: 0.1 }),
+  test("a 300-report book now builds and evaluates (sparse model)", () => {
+    // 300 reports x 60 deals = 18k deals - impossible with the old dense matrix
+    const big = Array.from({ length: 300 }, (_, i) =>
+      makeReport({ id: `big${i}`, n: 60, seed: 1000 + i, offset: i * 37, volume: 0.1 }),
     );
-    expect(() => buildRiskModel(big)).toThrow(RiskModelTooLargeError);
+    const t0 = Date.now();
+    const model = buildRiskModel(big);
+    const ms = Date.now() - t0;
+    expect(model.eas).toHaveLength(300);
+    expect(model.eventCount).toBe(18000); // 300 reports x 60 deals
+    expect(ms).toBeLessThan(3000);
+    const ev = evaluatePlan(model, big.map(() => 0.01));
+    expect(Number.isFinite(ev.dd)).toBe(true);
+    expect(ev.dd).toBeGreaterThan(0);
+  });
+
+  test("refuses only an absurd book (over 1000 reports)", () => {
+    const tooMany = Array.from({ length: 1001 }, (_, i) =>
+      makeReport({ id: `x${i}`, n: 2, seed: 5000 + i, offset: i, volume: 0.1 }),
+    );
+    expect(() => buildRiskModel(tooMany)).toThrow(RiskModelTooLargeError);
     try {
-      buildRiskModel(big);
+      buildRiskModel(tooMany);
     } catch (err) {
-      expect(err.info.reports).toBe(200);
-      expect(err.info.cells).toBeGreaterThan(err.info.max);
-      expect(err.info.maxReports).toBeGreaterThanOrEqual(2);
-      expect(err.info.maxReports).toBeLessThan(200);
+      expect(err.info.reports).toBe(1001);
+      expect(err.info.maxReports).toBe(1000);
     }
   });
 

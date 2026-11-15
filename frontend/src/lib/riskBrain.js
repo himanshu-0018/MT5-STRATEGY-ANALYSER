@@ -33,16 +33,23 @@
 
 import { solveLP } from "./simplex";
 
+/** Solved max-profit vertex per model, keyed by cap settings (see maxProfitLots). */
+const directionCache = new WeakMap();
+
 const EPS = 1e-9;
 const DAY = 86400000;
 
 /**
- * The sizing model needs one cumulative P&L curve per report on a shared
- * timeline, so memory is reports x timestamps. Past a few million cells the
- * optimiser is both slow and pointless (nobody trades 500 EAs at once), so we
- * refuse it with an explicit error instead of freezing the tab.
+ * Sizing model limits.
+ *
+ * The model used to be a dense reports x timestamps matrix (~46M numbers for a
+ * 342-report book). It is now sparse - one entry per deal on a shared timeline -
+ * so memory and per-evaluation cost scale with the number of DEALS, not with
+ * reports x timestamps. The caps are absurdly high compared to what a human can
+ * actually size, and exist only so the tab can never lock up.
  */
-export const RISK_MODEL_MAX_CELLS = 2_000_000;
+export const RISK_MODEL_MAX_REPORTS = 1000;
+export const RISK_MODEL_MAX_EVENTS = 4_000_000;
 
 export class RiskModelTooLargeError extends Error {
   constructor(info) {
@@ -51,6 +58,7 @@ export class RiskModelTooLargeError extends Error {
     this.info = info;
   }
 }
+
 
 export const roundDown = (v, step) => {
   if (!(step > 0)) return v;
@@ -86,19 +94,11 @@ export const modalVolume = (deals) => {
 
 const utcDay = (t) => Math.floor(t / DAY) * DAY;
 const dot = (xs, ys) => {
-  let s = 0;
-  for (let i = 0; i < xs.length; i++) s += xs[i] * ys[i];
-  return s;
+  let s2 = 0;
+  for (let i = 0; i < xs.length; i++) s2 += xs[i] * ys[i];
+  return s2;
 };
 
-/* -------------------------------------------------------------------------- */
-/* model                                                                      */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Normalise every report to "P&L per 1.00 lot" and project all of them onto one
- * shared, deduplicated timeline.
- */
 export function buildRiskModel(reports) {
   if (!reports || !reports.length) return null;
 
@@ -132,50 +132,72 @@ export function buildRiskModel(reports) {
   const times = Float64Array.from([...timeSet].sort((a, b) => a - b));
   const T = times.length;
 
-  const cells = T * eas.length;
-  if (cells > RISK_MODEL_MAX_CELLS) {
+  let eventCount = 0;
+  for (const ea of eas) eventCount += ea.deals.length;
+  if (eas.length > RISK_MODEL_MAX_REPORTS || eventCount > RISK_MODEL_MAX_EVENTS) {
     throw new RiskModelTooLargeError({
       reports: eas.length,
+      events: eventCount,
       timestamps: T,
-      cells,
-      max: RISK_MODEL_MAX_CELLS,
-      maxReports: Math.max(2, Math.floor(RISK_MODEL_MAX_CELLS / Math.max(T, 1))),
+      maxReports: RISK_MODEL_MAX_REPORTS,
+      maxEvents: RISK_MODEL_MAX_EVENTS,
     });
   }
 
+  // time -> timeline index
+  const index = new Map();
+  for (let j = 0; j < T; j++) index.set(times[j], j);
+
+  // flat event list bucketed by timeline index: evStart[g]..evStart[g+1]
+  const counts = new Int32Array(T);
   for (const ea of eas) {
-    const cum = new Float64Array(T);
-    let ptr = 0;
-    let run = 0;
-    for (let j = 0; j < T; j++) {
-      const t = times[j];
-      while (ptr < ea.deals.length && ea.deals[ptr].time <= t) { run += ea.deals[ptr].ppl; ptr++; }
-      cum[j] = run;
+    for (const d of ea.deals) counts[index.get(d.time)] += 1;
+  }
+  const evStart = new Int32Array(T + 1);
+  for (let j = 0; j < T; j++) evStart[j + 1] = evStart[j] + counts[j];
+  const evEa = new Int32Array(eventCount);
+  const evPpl = new Float64Array(eventCount);
+  const cursor = evStart.slice(0, T);
+  for (let i = 0; i < eas.length; i++) {
+    for (const d of eas[i].deals) {
+      const g = index.get(d.time);
+      const k = cursor[g]++;
+      evEa[k] = i;
+      evPpl[k] = d.ppl;
     }
-    ea.cum = cum;
+  }
+
+  // per-EA view: which timeline slot each deal lands in, plus its running sum
+  for (const ea of eas) {
+    const n = ea.deals.length;
+    const g = new Int32Array(n);
+    const gcum = new Float64Array(n);
+    let run = 0;
+    for (let k = 0; k < n; k++) {
+      g[k] = index.get(ea.deals[k].time);
+      run += ea.deals[k].ppl;
+      gcum[k] = run;
+    }
+    ea.g = g;
+    ea.gcum = gcum;
 
     // standalone drawdown of this EA at 1.00 lot
     let peak = 0;
     let dd = 0;
-    let ddIdx = 0;
-    let peakIdx = 0;
-    let bestPeak = 0;
-    let peakAtTrough = 0;
-    for (let j = 0; j < T; j++) {
-      if (cum[j] > peak) { peak = cum[j]; bestPeak = j; }
-      const cur = peak - cum[j];
-      if (cur > dd) { dd = cur; ddIdx = j; peakAtTrough = bestPeak; }
+    for (let k = 0; k < n; k++) {
+      const v = gcum[k];
+      if (v > peak) peak = v;
+      const cur = peak - v;
+      if (cur > dd) dd = cur;
     }
     ea.ddPerLot = dd;
-    ea.ddPeakTime = times[peakAtTrough];
-    ea.ddTroughTime = times[ddIdx];
-    ea.firstTime = ea.deals.length ? ea.deals[0].time : null;
-    ea.lastTime = ea.deals.length ? ea.deals[ea.deals.length - 1].time : null;
+    ea.firstTime = n ? ea.deals[0].time : null;
+    ea.lastTime = n ? ea.deals[n - 1].time : null;
   }
 
   const daily = buildDailyMatrix(eas);
 
-  return { eas, times, T, daily, from: times[0], to: times[T - 1], count: reports.length };
+  return { eas, times, T, daily, evStart, evEa, evPpl, eventCount, from: times[0], to: times[T - 1], count: reports.length };
 }
 
 /** Joint calendar-day P&L matrix, used by the Monte Carlo engine. */
@@ -199,32 +221,75 @@ function buildDailyMatrix(eas) {
 /* evaluation                                                                 */
 /* -------------------------------------------------------------------------- */
 
+/** Cumulative P&L-per-lot of one report at timeline index g (binary search). */
+export function cumAt(model, i, g) {
+  const ea = model.eas[i];
+  const arr = ea.g;
+  let lo = 0;
+  let hi = arr.length - 1;
+  let best = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (arr[mid] <= g) { best = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  return best < 0 ? 0 : ea.gcum[best];
+}
+
+/** The whole cumulative curve of one report, materialised (used by the greedy step fill). */
+function cumSeries(model, i) {
+  const { T } = model;
+  const ea = model.eas[i];
+  const out = new Float64Array(T);
+  let k = 0;
+  let val = 0;
+  for (let j = 0; j < T; j++) {
+    while (k < ea.g.length && ea.g[k] <= j) { val = ea.gcum[k]; k += 1; }
+    out[j] = val;
+  }
+  return out;
+}
+
 export function equityAt(model, lots) {
-  const { eas, T } = model;
+  const { T, evStart, evEa, evPpl } = model;
   const eq = new Float64Array(T);
-  for (let i = 0; i < eas.length; i++) {
-    const w = lots[i] || 0;
-    if (!w) continue;
-    const cum = eas[i].cum;
-    for (let j = 0; j < T; j++) eq[j] += w * cum[j];
+  let run = 0;
+  for (let g = 0; g < T; g++) {
+    let step = 0;
+    for (let k = evStart[g]; k < evStart[g + 1]; k++) step += (lots[evEa[k]] || 0) * evPpl[k];
+    run += step;
+    eq[g] = run;
   }
   return eq;
 }
 
-/** Fast walk: drawdown of an already-built equity array. O(T). */
-function walk(eq, T) {
+/**
+ * Fast walk: drawdown of an already-built equity array. O(T).
+ *
+ * `blocks > 1` also returns the deepest trough inside each slice of the
+ * timeline, which the cutting-plane solver adds as several constraints at once.
+ * A single cut per iteration converges very slowly on a 300-report book because
+ * the LP can dodge it by reallocating across hundreds of strategies.
+ */
+function walk(eq, T, blocks = 1) {
   let peak = 0;
   let bestPeakIdx = 0;
   let dd = 0;
   let ddIdx = 0;
   let peakAtTrough = 0;
+  const cuts = blocks > 1 ? new Array(blocks).fill(null) : null;
+  const span = T > 0 ? T / blocks : 1;
   for (let j = 0; j < T; j++) {
     const v = eq[j];
     if (v > peak) { peak = v; bestPeakIdx = j; }
     const cur = peak - v;
     if (cur > dd) { dd = cur; ddIdx = j; peakAtTrough = bestPeakIdx; }
+    if (cuts && cur > 0) {
+      const b = Math.min(blocks - 1, (j / span) | 0);
+      const seenCut = cuts[b];
+      if (!seenCut || cur > seenCut.d) cuts[b] = { d: cur, t: j, p: bestPeakIdx };
+    }
   }
-  return { dd, peakIdx: peakAtTrough, troughIdx: ddIdx, peak };
+  return { dd, peakIdx: peakAtTrough, troughIdx: ddIdx, peak, cuts };
 }
 
 /** Combined equity, profit and true (deal-by-deal) drawdown for a lot vector. */
@@ -236,7 +301,7 @@ export function evaluatePlan(model, lots) {
   const contrib = new Array(eas.length).fill(0);
   if (w.dd > 0) {
     for (let i = 0; i < eas.length; i++) {
-      contrib[i] = (lots[i] || 0) * (eas[i].cum[w.peakIdx] - eas[i].cum[w.troughIdx]);
+      contrib[i] = (lots[i] || 0) * (cumAt(model, i, w.peakIdx) - cumAt(model, i, w.troughIdx));
     }
   }
   return {
@@ -291,21 +356,55 @@ export function maxProfitLots(model, budget, opts = {}) {
   const maxLot = opts.maxLot || 500;
   const blocked = opts.blocked;
   const cap = capsFor(model, budget, maxLot, blocked, opts.riskCap || 1);
-  const c = eas.map((e, i) => (blocked && blocked[i] ? 0 : e.totalPerLot));
 
-  const rows = [];
-  cap.forEach((capI, i) => {
+  // Work in units of each strategy's own cap (w = scale * u, u in [0,1]).
+  // The raw LP mixes caps from 0.001 to 100 lots and window coefficients that
+  // span orders of magnitude, which makes the simplex crawl through degenerate
+  // pivots. This scaling is an exact reparametrisation of the same problem.
+  const scale = cap.map((c) => (c > 0 ? c : 1));
+  const profit = eas.map((e, i) => (blocked && blocked[i] ? 0 : e.totalPerLot * scale[i]));
+
+  const capRows = [];
+  for (let i = 0; i < m; i++) {
     const row = new Array(m).fill(0);
     row[i] = 1;
-    rows.push({ a: row, b: capI });
-  });
+    capRows.push({ a: row, b: 1 });
+  }
 
-  // seed with the worst window of an equal-risk mix so the first LP is sharp
+  const CUTS = 10;
+  const seen = new Set();
+  let cutRows = [];
+  const addCut = (p, t, at) => {
+    const key = `${p}:${t}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    const row = eas.map((_, i) => (cumAt(model, i, p) - cumAt(model, i, t)) * scale[i]);
+    // normalise the row so every cut has comparable magnitude (same half-space)
+    let norm = 0;
+    for (const v of row) norm = Math.max(norm, Math.abs(v));
+    if (norm < 1e-12) return false;
+    cutRows.push({ a: row.map((v) => v / norm), b: budget / norm, key, at });
+    return true;
+  };
+
+  // Seed with several windows from an equal-risk mix so the first LP is sharp.
   const seedLots = eas.map((e, i) => (cap[i] > 0 ? Math.min(cap[i], (budget / m) / Math.max(e.ddPerLot, budget * 1e-6)) : 0));
-  const seedDD = walk(equityAt(model, seedLots), model.T);
+  const seedDD = walk(equityAt(model, seedLots), model.T, CUTS);
   if (seedDD.dd > budget * 1e-9) {
-    const row = eas.map((e) => e.cum[seedDD.peakIdx] - e.cum[seedDD.troughIdx]);
-    rows.push({ a: row, b: budget });
+    addCut(seedDD.peakIdx, seedDD.troughIdx, 0);
+    for (const c of seedDD.cuts) if (c) addCut(c.p, c.t, 0);
+  }
+
+  // The LP is homogeneous in the budget: caps and cut right-hand sides both
+  // scale with it, so a solution found at one budget is the solution at any
+  // other budget, rescaled. Cache the vertex per (model, cap) and scale.
+  const cacheKey = `${opts.riskCap || 1}|${maxLot}|${blocked ? blocked.map((b) => (b ? 1 : 0)).join("") : "-"}`;
+  let store = directionCache.get(model);
+  if (!store) { store = new Map(); directionCache.set(model, store); }
+  const cached = store.get(cacheKey);
+  if (cached && cached.budget > 0 && budget > 0) {
+    const f = budget / cached.budget;
+    return { lots: cached.lots.map((v) => v * f), iters: cached.iters, converged: cached.converged, cap, warm: true };
   }
 
   let best = null;
@@ -313,20 +412,36 @@ export function maxProfitLots(model, budget, opts = {}) {
   const maxIters = opts.maxIters || 90;
 
   for (; iters < maxIters; iters++) {
-    const lp = solveLP(c, rows.map((r) => r.a), rows.map((r) => r.b));
+    const rows = cutRows.length ? capRows.concat(cutRows) : capRows;
+    const lp = solveLP(profit, rows.map((r) => r.a), rows.map((r) => r.b));
     if (!lp || !lp.x) break;
-    const w = lp.x.map((v, i) => (cap[i] > 0 ? Math.min(cap[i], Math.max(0, v)) : 0));
-    const eq = equityAt(model, w);
-    const r = walk(eq, model.T);
+
+    const u = lp.x;
+    const w = u.map((v, i) => (cap[i] > 0 ? Math.min(cap[i], Math.max(0, v * scale[i])) : 0));
+    const r = walk(equityAt(model, w), model.T, CUTS);
     if (r.dd <= budget * (1 + 1e-7)) {
+      store.set(cacheKey, { budget, lots: w.slice(), iters: iters + 1, converged: true });
       return { lots: w, iters: iters + 1, converged: true, cap };
     }
     if (!best || r.dd < best.dd) best = { lots: w, dd: r.dd };
-    const row = eas.map((e) => e.cum[r.peakIdx] - e.cum[r.troughIdx]);
-    let norm = 0;
-    for (const v of row) norm += Math.abs(v);
-    if (norm < 1e-12) break;
-    rows.push({ a: row, b: budget });
+
+    let added = addCut(r.peakIdx, r.troughIdx, iters) ? 1 : 0;
+    for (const c of r.cuts) if (c && addCut(c.p, c.t, iters)) added += 1;
+    if (!added) break;
+
+    // Drop cuts that have gone slack: they no longer shape the solution, but
+    // every extra row makes the simplex slower. A dropped window that becomes
+    // violated again is simply re-added (its key is released).
+    if (cutRows.length > 40) {
+      const keep = [];
+      for (const row of cutRows) {
+        let slack = row.b;
+        for (let i = 0; i < m; i++) slack -= row.a[i] * u[i];
+        if (iters - row.at < 3 || slack <= row.b * 0.02) { keep.push(row); continue; }
+        seen.delete(row.key);
+      }
+      cutRows = keep;
+    }
   }
 
   return { lots: best?.lots || seedLots, iters, converged: false, cap };
@@ -389,7 +504,7 @@ export function standaloneMaxLots(model, budget, opts = {}) {
  */
 function ddWithDelta(model, eq, i, delta) {
   const { T } = model;
-  const cum = model.eas[i].cum;
+  const cum = cumSeries(model, i);
   let peak = 0;
   let dd = 0;
   for (let j = 0; j < T; j++) {
@@ -406,7 +521,10 @@ function refineToStep(model, lots, budget, step, cap) {
   let cur = lots.slice();
   let eq = equityAt(model, cur);
   let curProfit = dot(cur, eas.map((e) => e.totalPerLot));
-  const maxAdds = Math.min(60, 2 * eas.length + 6);
+  // Each candidate costs a full O(T) walk, so a 300-report book only gets a few
+  // refinement steps (the LP solution is already continuous-optimal).
+  const maxAdds = eas.length > 60 ? 4 : Math.min(60, 2 * eas.length + 6);
+  const series = [];
 
   for (let add = 0; add < maxAdds; add++) {
     let best = null;
@@ -415,7 +533,8 @@ function refineToStep(model, lots, budget, step, cap) {
       const next = parseFloat((cur[i] + step).toFixed(8));
       if (next < step / 2) continue;
       if (cap && next > cap[i] + step * 1e-6) continue;
-      const cum = eas[i].cum;
+      if (!series[i]) series[i] = cumSeries(model, i);
+      const cum = series[i];
       // walk the hypothetical curve without rebuilding it
       let peak = 0;
       let dd = 0;
@@ -431,7 +550,7 @@ function refineToStep(model, lots, budget, step, cap) {
     }
     if (!best) break;
     cur[best.i] = parseFloat((cur[best.i] + step).toFixed(8));
-    const cum = eas[best.i].cum;
+    const cum = series[best.i] || (series[best.i] = cumSeries(model, best.i));
     for (let j = 0; j < T; j++) eq[j] += step * cum[j];
     curProfit = best.p;
   }
