@@ -74,6 +74,68 @@ Because drawdown is homogeneous, the optimal allocation is a single direction in
 budget only scales the size. That is also why the efficient frontier is a set of straight lines and
 why "equal risk" or "scale everything by the same multiplier" are just different slopes.
 
+## Desktop app (fully offline)
+
+The same app runs as a desktop application - no browser, no server, no internet.
+
+```bash
+cd frontend && yarn install && yarn build     # produces frontend/build
+cd ../desktop && npm install && npm start     # runs it in an Electron window
+```
+
+### Building the installers
+
+Run these on the matching OS (a Windows `.exe` cannot be produced on macOS):
+
+| Target | Command (inside `desktop/`) | Output |
+|---|---|---|
+| Windows `.exe` installer | `npm run dist:win` | `release/QuantFolio-Setup-1.0.0.exe` |
+| Windows portable folder | `npx electron-builder --win --dir` | `release/win-unpacked/QuantFolio.exe` |
+| macOS `.dmg` | `npm run dist:mac` | `release/QuantFolio-1.0.0.dmg` |
+
+Prerequisites on the Windows PC: [Node.js 20+](https://nodejs.org) and
+[Yarn 1](https://classic.yarnpkg.com) (`npm i -g yarn`). Then:
+
+```powershell
+cd frontend
+yarn install
+yarn build
+cd ..\desktop
+npm install
+npm run dist:win
+```
+
+`desktop/windows-installer.workflow.yml` is the same build as a GitHub Actions
+workflow - copy it to `.github/workflows/build-desktop.yml` if you ever want CI
+to produce the installer instead (adding it needs a token with the `workflow`
+scope).
+
+The shell (`desktop/main.js`) serves the built app over a private `app://`
+protocol instead of opening a port - every absolute path (`/static/...`,
+`/samples/...`) keeps working, there is no firewall prompt, and nothing is
+requested from the network: fonts are self-hosted in `frontend/src/fonts`.
+
+## Performance
+
+The app is built to stay responsive with a large book. Measured with **500
+reports / 90,000 deals** (Chrome, production build):
+
+| Interaction | Before | After |
+|---|---|---|
+| Upload + first render | 5.9 s | **4.2 s** |
+| Keystroke in start balance | 390 ms | **67 ms** |
+| Toggle a report on/off | 549 ms | **225 ms** |
+| Remove a report | 393 ms | **238 ms** |
+| Switch Portfolio ↔ Lot Brain | 113 ms | **26 ms** |
+| DOM nodes after upload | 14,781 | **1,431** |
+
+How: the report table is virtualised (only visible rows are drawn), the
+starting balance is debounced so typing does not rebuild a 90k-deal portfolio on
+every keypress, day/month bucketing caches its keys instead of allocating a
+`Date` per deal, the parser reads only the settings rows above the Deals header
+and uses `row.cells`, and the Lot Brain model is built lazily, cached, and
+capped at 2M cells.
+
 ## Quick start
 
 ```bash

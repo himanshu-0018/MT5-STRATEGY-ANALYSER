@@ -4,12 +4,6 @@ const num = (s) => {
   return Number.isFinite(v) ? v : 0;
 };
 
-const parseTime = (s) => {
-  const m = s.match(/(\d{4})\.(\d{2})\.(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?/);
-  if (!m) return null;
-  return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
-};
-
 const decode = (buf) => {
   const b = new Uint8Array(buf);
   if (b[0] === 0xff && b[1] === 0xfe) return new TextDecoder("utf-16le").decode(buf);
@@ -25,6 +19,8 @@ const findValue = (cells, label) => {
   return i >= 0 ? cells[i + 1] : undefined;
 };
 
+const TIME_RE = /(\d{4})\.(\d{2})\.(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?/;
+
 const OUT_DIRS = new Set(["out", "in/out", "out by"]);
 
 /** "btc_2024_fixed.html" -> "btc_2024_fixed" (what the trader sees in their folder) */
@@ -34,40 +30,65 @@ export const reportLabel = (fileName) =>
 export function parseMt5Report(buffer, fileName) {
   const html = decode(buffer);
   const doc = new DOMParser().parseFromString(html, "text/html");
-  const cells = Array.from(doc.querySelectorAll("td")).map(cellText);
 
+  // Find the "Deals" header first - querying `th, b` is cheap, while turning
+  // every <td> in the document into a string is not (a 500-report upload was
+  // mapping millions of cells just to read five settings fields).
   const dealsHeader = Array.from(doc.querySelectorAll("th, b")).find((el) => cellText(el) === "Deals");
   if (!dealsHeader) throw new Error("No 'Deals' table found. Is this an MT5 Strategy Tester HTML report?");
 
+  const headerRow = dealsHeader.closest("tr");
   const table = dealsHeader.closest("table");
-  const rows = Array.from(table.querySelectorAll("tr"));
-  const startIdx = rows.findIndex((r) => r.contains(dealsHeader));
+  if (!table) throw new Error("Malformed report: 'Deals' is not inside a table.");
+
+  // Settings live in the rows above the Deals header (same table in MT5
+  // exports). Only those rows are stringified.
+  const settings = [];
+  for (const row of table.rows) {
+    if (row === headerRow) break;
+    const cs = row.cells;
+    for (let i = 0; i < cs.length; i++) settings.push(cellText(cs[i]));
+  }
+  // Unusual layouts: fall back to the full scan only when the deposit is missing.
+  const cells = findValue(settings, "Initial Deposit:") === undefined
+    ? Array.from(doc.querySelectorAll("td")).map(cellText)
+    : settings;
+
+  let startIdx = -1;
+  const rows = table.rows;
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i] === headerRow) { startIdx = i; break; }
+  }
+
   const deals = [];
   for (let i = startIdx + 1; i < rows.length; i++) {
-    const tds = Array.from(rows[i].querySelectorAll("td")).map(cellText);
-    if (tds.length < 13) continue;
-    const time = parseTime(tds[0]);
-    if (time == null) continue;
-    const type = tds[3].toLowerCase();
+    const cs = rows[i].cells;
+    if (cs.length < 13) continue;
+    const t0 = cellText(cs[0]);
+    if (t0.length < 16) continue;
+    const tm = TIME_RE.exec(t0);
+    if (!tm) continue;
+    const type = cellText(cs[3]).toLowerCase();
     if (type !== "buy" && type !== "sell") continue;
-    const direction = tds[4].toLowerCase();
-    const commission = num(tds[8]);
-    const swap = num(tds[9]);
-    const profit = num(tds[10]);
+    const time = Date.UTC(+tm[1], +tm[2] - 1, +tm[3], +tm[4], +tm[5], +(tm[6] || 0));
+    const direction = cellText(cs[4]).toLowerCase();
+    const commission = num(cellText(cs[8]));
+    const swap = num(cellText(cs[9]));
+    const profit = num(cellText(cs[10]));
     deals.push({
       time,
-      deal: tds[1],
-      symbol: tds[2],
+      deal: cellText(cs[1]),
+      symbol: cellText(cs[2]),
       type,
       direction,
-      volume: num(tds[5]),
-      price: num(tds[6]),
+      volume: num(cellText(cs[5])),
+      price: num(cellText(cs[6])),
       commission,
       swap,
       profit,
       net: commission + swap + profit,
       isOut: OUT_DIRS.has(direction),
-      comment: tds[12],
+      comment: cellText(cs[12]),
     });
   }
   if (!deals.length) throw new Error("No trade deals found in report.");

@@ -1,0 +1,84 @@
+name: Build desktop installer
+
+# Produces a Windows .exe installer (and a macOS .dmg) with Electron.
+# Run it manually from the Actions tab, or push a tag like v1.0.0.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  windows:
+    name: Windows installer (.exe)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install yarn
+        run: npm install --global yarn@1.22.22
+
+      - name: Build the web app
+        working-directory: frontend
+        env:
+          CI: "false"
+        run: |
+          yarn install --frozen-lockfile
+          yarn build
+
+      - name: Package the installer
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          npm install --no-audit --no-fund
+          npm run dist:win
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: QuantFolio-Windows-Installer
+          path: desktop/release/*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+  macos:
+    name: macOS installer (.dmg)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install yarn
+        run: npm install --global yarn@1.22.22
+
+      - name: Build the web app
+        working-directory: frontend
+        env:
+          CI: "false"
+        run: |
+          yarn install --frozen-lockfile
+          yarn build
+
+      - name: Package the installer
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          npm install --no-audit --no-fund
+          npm run dist:mac
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: QuantFolio-macOS-Installer
+          path: desktop/release/*.dmg
+          if-no-files-found: error
+          retention-days: 30

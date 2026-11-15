@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "@/App.css";
 import { Toaster, toast } from "sonner";
 import { FlaskConical, Eraser, LayoutDashboard, BrainCircuit, Loader2, AlertTriangle } from "lucide-react";
@@ -87,7 +87,15 @@ function App() {
   const summaries = useMemo(() => Object.fromEntries(reports.map((r) => [r.id, reportSummary(r)])), [reports]);
   const colorIdx = Object.fromEntries(reports.map((r, i) => [r.id, i]));
   const active = reports.filter((r) => enabled[r.id]).map((r) => ({ ...r, ci: colorIdx[r.id] }));
-  const start = parseFloat(balance) || 0;
+  // Typing in the balance field used to rebuild the whole portfolio on every
+  // keystroke (~400 ms at 500 reports). Keep the input instant and settle the
+  // computed balance shortly after the user stops typing.
+  const [start, setStart] = useState(parseFloat(balance) || 0);
+  useEffect(() => {
+    const v = parseFloat(balance) || 0;
+    const h = setTimeout(() => setStart(v), 220);
+    return () => clearTimeout(h);
+  }, [balance]);
   const portfolio = useMemo(() => (active.length ? buildPortfolio(active, start) : null), [reports, enabled, start]); // eslint-disable-line react-hooks/exhaustive-deps
   // The sizing model is a T x EAs matrix of cumulative P&L, so building it for
   // hundreds of reports is expensive. Only do it when the brain is actually on
@@ -116,7 +124,11 @@ function App() {
     }, 40);
     return () => clearTimeout(h);
   }, [tab, activeKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  const colorOf = (ri) => REPORT_COLORS[(active[ri]?.ci ?? 0) % REPORT_COLORS.length];
+  const colorOf = useCallback((ri) => REPORT_COLORS[(active[ri]?.ci ?? 0) % REPORT_COLORS.length], [activeKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // stable handlers keep the memoised report table from re-rendering
+  const toggleReport = useCallback((id) => setEnabled((e) => ({ ...e, [id]: !e[id] })), []);
+  const removeReport = useCallback((id) => setReports((r) => r.filter((x) => x.id !== id)), []);
 
   return (
     <div className="qf-app min-h-screen">
@@ -193,8 +205,8 @@ function App() {
           <>
             <Uploader onFiles={handleFiles} compact />
             <ReportTable reports={reports} summaries={summaries} enabled={enabled}
-              onToggle={(id) => setEnabled((e) => ({ ...e, [id]: !e[id] }))}
-              onRemove={(id) => setReports((r) => r.filter((x) => x.id !== id))} />
+              onToggle={toggleReport}
+              onRemove={removeReport} />
             {tab === "brain" ? (
               active.length ? (
                 modelError ? (

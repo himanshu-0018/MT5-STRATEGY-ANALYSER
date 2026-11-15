@@ -1,0 +1,72 @@
+{
+  "name": "quantfolio-desktop",
+  "productName": "QuantFolio",
+  "version": "1.0.0",
+  "description": "QuantFolio — MT5 Strategy Analyser, offline desktop edition",
+  "main": "main.js",
+  "author": "himanshu-0018",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win nsis --x64",
+    "dist:mac": "electron-builder --mac dmg",
+    "dist:dir": "electron-builder --dir"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.quantfolio.analyser",
+    "productName": "QuantFolio",
+    "copyright": "QuantFolio",
+    "directories": {
+      "output": "release",
+      "buildResources": "build-assets"
+    },
+    "files": [
+      "main.js",
+      "package.json",
+      {
+        "from": "../frontend/build",
+        "to": "web"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build-assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "QuantFolio",
+      "artifactName": "QuantFolio-Setup-${version}.${ext}",
+      "deleteAppDataOnUninstall": false
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.finance",
+      "icon": "build-assets/icon.png"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "build-assets/icon.png",
+      "category": "Office"
+    }
+  }
+}

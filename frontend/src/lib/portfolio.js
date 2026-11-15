@@ -64,19 +64,41 @@ export function buildPortfolio(reports, start) {
   const stats = tradeStats(events);
   const { curve, dd, final } = drawdownWalk(events, start);
 
+  // Bucketing 90k deals with monthKey/dayKey/fmtDate created ~3 Date objects per
+  // event. Calendar days and months repeat heavily, so cache the strings by
+  // integer day index and reuse them.
+  const DAY_MS = 86400000;
+  const dayCache = new Map();
+  const dayInfo = (t) => {
+    const idx = Math.floor(t / DAY_MS);
+    let info = dayCache.get(idx);
+    if (!info) {
+      const iso = new Date(idx * DAY_MS).toISOString().slice(0, 10);
+      info = {
+        key: iso,
+        month: iso.slice(0, 7),
+        day: iso.replace(/-/g, "."),
+        time: idx * DAY_MS,
+      };
+      dayCache.set(idx, info);
+    }
+    return info;
+  };
+
   const months = {};
   const days = {};
   events.forEach((e) => {
-    const mk = monthKey(e.time);
+    const info = dayInfo(e.time);
+    const mk = info.month;
     months[mk] = months[mk] || { key: mk, total: 0, trades: 0, byReport: {} };
     months[mk].total += e.net;
     months[mk].byReport[e.ri] = (months[mk].byReport[e.ri] || 0) + e.net;
     if (e.isOut) months[mk].trades++;
-    const dk = dayKey(e.time);
+    const dk = info.key;
     days[dk] = days[dk] || {
       key: dk,
-      day: fmtDate(e.time),
-      time: utcDayStart(e.time),
+      day: info.day,
+      time: info.time,
       total: 0,
       trades: 0,
       wins: 0,
