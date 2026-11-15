@@ -21,6 +21,13 @@ Frontend-only React. `lib/mt5Parser.js` (UTF-16/UTF-8 decode, DOMParser, Deals t
 - $ / % toggle per day (day P&L vs. % of the balance at day open), month navigation across the whole uploaded range + month picker, monthly totals strip (net, trading days, trades, best/worst/avg day, win-day rate), click a day to list its deals with timestamps
 
 
+## Implemented (2026-11) – real-world 344-report batch
+First tested with the user's actual export: 344 HTML reports, 728 MB, 170,934 trades, UTF-16, files up to 33 MB with 678k `<td>` cells.
+- `mt5Parser` rewritten: `scanReport()` scans the HTML string for the Deals section and stops at the Orders header, so no DOM is built for normal reports (DOM path kept as a fallback). Result: 5.0 s to load all 344 (was: unable to load 50) at 357 MB heap; trade total matches an independent count exactly (170,934).
+- Empty exports (deals table present, zero buy/sell rows - e.g. 192.html/199.html) now report "contains no trades (only a deposit, no positions)" instead of a parse error.
+- `buildPortfolio`: trade pairing is lazy (only when a calendar day opens), and the equity curve is sampled while walking instead of materialising one object per deal. Toggle at this scale: 504ms -> 246ms; calendar day with 265 trades: 328ms.
+- Lot Brain on a 12-report subset of the same files: plan in 0.3 s.
+
 ## Implemented (2026-11) – performance + offline desktop build
 - **Performance** (500 reports / 90k deals): keystroke latency 390ms -> 67ms, report toggle 549ms -> 225ms, tab switch 113ms -> 26ms, upload+render 5.9s -> 4.2s, DOM nodes 14.8k -> 1.4k.
   - `ReportTable` is virtualised (fixed 62px rows, spacer rows, sticky header, ResizeObserver) and `memo`ised with stable `useCallback` handlers.

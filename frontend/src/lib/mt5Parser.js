@@ -12,28 +12,131 @@ const decode = (buf) => {
   return new TextDecoder("utf-8").decode(buf);
 };
 
-const cellText = (td) => (td.textContent || "").replace(/\u00a0/g, " ").trim();
-
-const findValue = (cells, label) => {
-  const i = cells.findIndex((t) => t.toLowerCase() === label.toLowerCase());
-  return i >= 0 ? cells[i + 1] : undefined;
-};
-
 const TIME_RE = /(\d{4})\.(\d{2})\.(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?/;
-
 const OUT_DIRS = new Set(["out", "in/out", "out by"]);
 
 /** "btc_2024_fixed.html" -> "btc_2024_fixed" (what the trader sees in their folder) */
 export const reportLabel = (fileName) =>
   String(fileName || "").replace(/^.*[\\/]/, "").replace(/\.[^.]+$/, "").trim();
 
-export function parseMt5Report(buffer, fileName) {
-  const html = decode(buffer);
-  const doc = new DOMParser().parseFromString(html, "text/html");
+/* ------------------------------------------------------------------ */
+/* Fast path: scan the HTML string for the Deals section              */
+/* ------------------------------------------------------------------ */
 
-  // Find the "Deals" header first - querying `th, b` is cheap, while turning
-  // every <td> in the document into a string is not (a 500-report upload was
-  // mapping millions of cells just to read five settings fields).
+// MT5 reports are machine generated: every cell is a plain <td>. Stripping tags
+// only when they are present keeps the hot loop cheap.
+const cleanCell = (v) => {
+  let s = v;
+  if (s.indexOf("<") >= 0) s = s.replace(/<[^>]*>/g, " ");
+  if (s.indexOf("&") >= 0) {
+    s = s.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+  }
+  return s.trim();
+};
+
+/** Every <td> inside [from, to) as trimmed text. */
+function cellsBetween(s, from, to) {
+  const out = [];
+  let i = s.indexOf("<td", from);
+  while (i >= 0 && i < to) {
+    const gt = s.indexOf(">", i);
+    if (gt < 0 || gt > to) break;
+    const close = s.indexOf("</td>", gt);
+    if (close < 0 || close > to) break;
+    out.push(cleanCell(s.slice(gt + 1, close)));
+    i = s.indexOf("<td", close);
+  }
+  return out;
+}
+
+const findValue = (cells, label) => {
+  const want = label.toLowerCase();
+  for (let i = 0; i < cells.length; i++) {
+    if (cells[i].toLowerCase() === want) return cells[i + 1];
+  }
+  return undefined;
+};
+
+/**
+ * Walk the Deals table without building a DOM.
+ *
+ * A 30 MB report holds ~680k <td> cells; DOMParser turns that into a ~1 GB tree
+ * (seconds of blocking work per file) whereas this reads only the ~15k deal
+ * rows we need and stops before the Orders section.
+ */
+function scanReport(html) {
+  const iDeals = html.indexOf(">Deals<");
+  if (iDeals < 0) return null;
+
+  // settings live above the Deals header (a few dozen cells)
+  const headCells = cellsBetween(html, 0, iDeals);
+
+  let end = html.length;
+  const iOrders = html.indexOf(">Orders<", iDeals + 1);
+  if (iOrders > 0) end = iOrders;
+  const iTable = html.indexOf("</table>", iDeals);
+  if (iTable > 0 && iTable < end) end = iTable;
+
+  const deals = [];
+  let pos = html.indexOf("<tr", iDeals);
+  while (pos >= 0 && pos < end) {
+    const rowEnd = html.indexOf("</tr>", pos);
+    const stop = rowEnd < 0 || rowEnd > end ? end : rowEnd;
+
+    // cheap gate: a deal row's first cell must start with a date/time
+    const firstCell = html.indexOf("<td", pos);
+    let parsedRow = false;
+    if (firstCell > 0 && firstCell < stop) {
+      const gt = html.indexOf(">", firstCell);
+      const close = gt > 0 ? html.indexOf("</td>", gt) : -1;
+      if (close > gt) {
+        const tm = TIME_RE.exec(html.slice(gt + 1, close));
+        if (tm) {
+          const cells = cellsBetween(html, pos, stop);
+          if (cells.length >= 13) {
+            const type = cells[3].toLowerCase();
+            if (type === "buy" || type === "sell") {
+              const direction = cells[4].toLowerCase();
+              const commission = num(cells[8]);
+              const swap = num(cells[9]);
+              const profit = num(cells[10]);
+              deals.push({
+                time: Date.UTC(+tm[1], +tm[2] - 1, +tm[3], +tm[4], +tm[5], +(tm[6] || 0)),
+                deal: cells[1],
+                symbol: cells[2],
+                type,
+                direction,
+                volume: num(cells[5]),
+                price: num(cells[6]),
+                commission,
+                swap,
+                profit,
+                net: commission + swap + profit,
+                isOut: OUT_DIRS.has(direction),
+                comment: cells[12],
+              });
+              parsedRow = true;
+            }
+          }
+        }
+      }
+    }
+    if (!parsedRow && rowEnd < 0) break;
+    pos = rowEnd < 0 ? -1 : html.indexOf("<tr", rowEnd);
+  }
+
+  if (!deals.length) return null;
+  return { deals, cells: headCells };
+}
+
+/* ------------------------------------------------------------------ */
+/* Fallback: DOM parse (unusual layouts)                              */
+/* ------------------------------------------------------------------ */
+
+function parseWithDom(html) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const cellText = (td) => (td.textContent || "").replace(/\u00a0/g, " ").trim();
+
   const dealsHeader = Array.from(doc.querySelectorAll("th, b")).find((el) => cellText(el) === "Deals");
   if (!dealsHeader) throw new Error("No 'Deals' table found. Is this an MT5 Strategy Tester HTML report?");
 
@@ -41,18 +144,12 @@ export function parseMt5Report(buffer, fileName) {
   const table = dealsHeader.closest("table");
   if (!table) throw new Error("Malformed report: 'Deals' is not inside a table.");
 
-  // Settings live in the rows above the Deals header (same table in MT5
-  // exports). Only those rows are stringified.
-  const settings = [];
+  const cells = [];
   for (const row of table.rows) {
     if (row === headerRow) break;
     const cs = row.cells;
-    for (let i = 0; i < cs.length; i++) settings.push(cellText(cs[i]));
+    for (let i = 0; i < cs.length; i++) cells.push(cellText(cs[i]));
   }
-  // Unusual layouts: fall back to the full scan only when the deposit is missing.
-  const cells = findValue(settings, "Initial Deposit:") === undefined
-    ? Array.from(doc.querySelectorAll("td")).map(cellText)
-    : settings;
 
   let startIdx = -1;
   const rows = table.rows;
@@ -70,13 +167,12 @@ export function parseMt5Report(buffer, fileName) {
     if (!tm) continue;
     const type = cellText(cs[3]).toLowerCase();
     if (type !== "buy" && type !== "sell") continue;
-    const time = Date.UTC(+tm[1], +tm[2] - 1, +tm[3], +tm[4], +tm[5], +(tm[6] || 0));
     const direction = cellText(cs[4]).toLowerCase();
     const commission = num(cellText(cs[8]));
     const swap = num(cellText(cs[9]));
     const profit = num(cellText(cs[10]));
     deals.push({
-      time,
+      time: Date.UTC(+tm[1], +tm[2] - 1, +tm[3], +tm[4], +tm[5], +(tm[6] || 0)),
       deal: cellText(cs[1]),
       symbol: cellText(cs[2]),
       type,
@@ -92,8 +188,25 @@ export function parseMt5Report(buffer, fileName) {
     });
   }
   if (!deals.length) throw new Error("No trade deals found in report.");
-  deals.sort((a, b) => a.time - b.time);
+  return { deals, cells };
+}
 
+/* ------------------------------------------------------------------ */
+
+export function parseMt5Report(buffer, fileName) {
+  const html = decode(buffer);
+  let parsed = scanReport(html);
+  if (!parsed) {
+    // An MT5 report can be exported with settings but no trading history (the
+    // EA never opened a position). Say so instead of "malformed report".
+    if (html.indexOf(">Deals<") >= 0 && !/<td>\s*(buy|sell)\s*<\/td>/i.test(html)) {
+      throw new Error("contains no trades (only a deposit, no positions)");
+    }
+    parsed = parseWithDom(html);
+  }
+  parsed.deals.sort((a, b) => a.time - b.time);
+
+  const cells = parsed.cells;
   const eaExpert = findValue(cells, "Expert:") || "";
   // Reports are identified by the file name the trader actually saved, not by
   // the EA name inside the report (two files can be the same EA, and the file
@@ -106,7 +219,7 @@ export function parseMt5Report(buffer, fileName) {
     label,
     expert: label,
     eaExpert,
-    symbol: findValue(cells, "Symbol:") || deals[0].symbol,
+    symbol: findValue(cells, "Symbol:") || parsed.deals[0].symbol,
     period,
     timeframe: period.split(" ")[0],
     initialDeposit: num(findValue(cells, "Initial Deposit:")) || 1000,
@@ -116,6 +229,6 @@ export function parseMt5Report(buffer, fileName) {
       equityDD: findValue(cells, "Equity Drawdown Maximal:") || "",
       totalTrades: num(findValue(cells, "Total Trades:")),
     },
-    deals,
+    deals: parsed.deals,
   };
 }

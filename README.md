@@ -117,24 +117,33 @@ requested from the network: fonts are self-hosted in `frontend/src/fonts`.
 
 ## Performance
 
-The app is built to stay responsive with a large book. Measured with **500
-reports / 90,000 deals** (Chrome, production build):
+Measured on a **real 344-report batch** (728 MB of MT5 HTML, 170,934 trades,
+files up to 33 MB / 678,000 table cells each):
 
-| Interaction | Before | After |
-|---|---|---|
-| Upload + first render | 5.9 s | **4.2 s** |
-| Keystroke in start balance | 390 ms | **67 ms** |
-| Toggle a report on/off | 549 ms | **225 ms** |
-| Remove a report | 393 ms | **238 ms** |
-| Switch Portfolio ↔ Lot Brain | 113 ms | **26 ms** |
-| DOM nodes after upload | 14,781 | **1,431** |
+| | |
+|---|---|
+| Upload + parse + first render | **5.0 s** |
+| JS heap after load | 357 MB |
+| Keystroke in start balance | 80 ms |
+| Toggle a report on/off | 246 ms |
+| Switch Portfolio ↔ Lot Brain | 29 ms |
+| Open a calendar day (265 trades) | 328 ms |
+| Lot Brain on a 12-report subset | 0.3 s |
 
-How: the report table is virtualised (only visible rows are drawn), the
-starting balance is debounced so typing does not rebuild a 90k-deal portfolio on
-every keypress, day/month bucketing caches its keys instead of allocating a
-`Date` per deal, the parser reads only the settings rows above the Deals header
-and uses `row.cells`, and the Lot Brain model is built lazily, cached, and
-capped at 2M cells.
+How it stays fast:
+
+- **The parser never builds a DOM.** MT5 exports are UTF-16 HTML where a single
+  file can hold 678k `<td>` cells; `DOMParser` on that is ~1 GB and seconds of
+  blocking work per file. `scanReport()` instead walks the string, reads only the
+  Deals section and stops before the Orders table (which is usually most of the
+  file). DOM parsing remains only as a fallback for unusual layouts.
+- **The report list is virtualised** - 342 rows cost ~1.4k DOM nodes, not 5k cells.
+- **Typing is debounced** (220 ms) so the portfolio is not rebuilt per keystroke.
+- **Month/day buckets** reuse cached keys instead of allocating a `Date` per deal.
+- **Trade pairing is lazy** - deals are paired only when a calendar day is opened.
+- **The equity curve is sampled** while walking (the chart only draws ~2,500 points).
+- **The Lot Brain model is built lazily**, cached, and capped so it can never hang
+  the tab; it sizes a subset of reports at a time.
 
 ## Quick start
 

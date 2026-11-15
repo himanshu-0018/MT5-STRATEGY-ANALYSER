@@ -227,9 +227,10 @@ function App() {
                               instantly usable in a browser.
                             </p>
                             <p className="mt-2 text-xs leading-relaxed text-slate-400">
-                              Turn some reports off in the <span className="text-slate-200">Use</span> column above - about{" "}
-                              <span className="font-mono text-cyan-300">{modelError.maxReports}</span> of these fit comfortably at this
-                              history length - and the plan will build right away.
+                              Turn some reports off in the <span className="text-slate-200">Use</span> column above and the plan builds
+                              right away - about <span className="font-mono text-cyan-300">{modelError.maxReports}</span> of these fit at
+                              the current timeline length, and disabling reports also shortens that timeline, so the limit rises as you
+                              turn them off.
                             </p>
                           </>
                         ) : (

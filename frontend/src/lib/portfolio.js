@@ -39,25 +39,40 @@ export function tradeStats(deals) {
   return { trades, wins, grossProfit: gp, grossLoss: gl, net, pf: gl < 0 ? gp / -gl : gp > 0 ? Infinity : 0, winRate: trades ? wins / trades : 0 };
 }
 
-export function drawdownWalk(events, start) {
+export function drawdownWalk(events, start, maxPoints = 4000) {
+  const stride = Math.max(1, Math.ceil(events.length / Math.max(1, maxPoints)));
   let bal = start, peak = start, peakTime = events[0]?.time ?? 0;
   const dd = { amount: 0, pct: 0, peakTime: null, troughTime: null, peakBal: start, troughBal: start, pctAmount: 0 };
   const curve = [];
+  let i = -1;
   for (const e of events) {
+    i += 1;
     bal += e.net;
     if (bal > peak) { peak = bal; peakTime = e.time; }
     const cur = peak - bal;
     const pct = peak > 0 ? cur / peak : 0;
     if (cur > dd.amount) Object.assign(dd, { amount: cur, peakTime, troughTime: e.time, peakBal: peak, troughBal: bal });
     if (pct > dd.pct) Object.assign(dd, { pct, pctAmount: cur });
-    curve.push({ time: e.time, balance: bal, dd: -cur, ddPct: -pct * 100 });
+    if (i % stride === 0 || i === events.length - 1) curve.push({ time: e.time, balance: bal, dd: -cur, ddPct: -pct * 100 });
   }
   return { curve, dd, final: bal };
 }
 
 export function buildPortfolio(reports, start) {
-  const trades = pairTrades(reports);
-  const tradesByDay = tradesByCloseDay(trades);
+  // Pairing deals into trades walks every deal and is only needed when someone
+  // opens a day in the calendar, so do it on first access instead of on every
+  // portfolio rebuild (which happens on each report toggle).
+  let tradesCache = null;
+  let byDayCache = null;
+  const getTrades = () => {
+    if (!tradesCache) tradesCache = pairTrades(reports);
+    return tradesCache;
+  };
+  const getByDay = () => {
+    if (!byDayCache) byDayCache = tradesByCloseDay(getTrades());
+    return byDayCache;
+  };
+
   const events = [];
   reports.forEach((r, ri) => r.deals.forEach((d) => events.push({ ...d, report: r.expert, ri })));
   events.sort((a, b) => a.time - b.time);
@@ -149,10 +164,8 @@ export function buildPortfolio(reports, start) {
 
   const ddDeals = dd.peakTime != null ? events.filter((e) => e.time > dd.peakTime && e.time <= dd.troughTime) : [];
 
-  return {
+  const portfolio = {
     events,
-    trades,
-    tradesByDay,
     stats,
     curve,
     dd,
@@ -165,6 +178,10 @@ export function buildPortfolio(reports, start) {
     from: events[0].time,
     to: events[events.length - 1].time,
   };
+
+  Object.defineProperty(portfolio, "trades", { get: getTrades, enumerable: true });
+  Object.defineProperty(portfolio, "tradesByDay", { get: getByDay, enumerable: true });
+  return portfolio;
 }
 
 export function reportSummary(r) {
