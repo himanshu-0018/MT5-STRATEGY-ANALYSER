@@ -24,6 +24,23 @@ That single property is enough to answer the sizing question **exactly**:
 > *"I can bear $200 of drawdown. What is the largest lot size for each of my 10 EAs such that the
 > combined book never draws down more than $200?"*
 
+## Two upload modes
+
+Chosen **before** you upload, in the uploader card:
+
+| Mode | Use it when |
+|---|---|
+| **One file per EA** | Each Strategy Tester export is its own strategy (the normal case). Every file becomes one row, labelled with the file name. |
+| **Files hold several EAs** | A single file contains trades from many EAs - e.g. an account statement or merged history. |
+
+In the second mode the Deals table is split into one strategy per EA: the EA tag
+comes from each trade's **entry** comment (its exits inherit it, since they
+usually just say `sl 4092.42`), a **Magic** column wins when the export has one,
+untagged deals join the dominant group, and a split only happens when at least
+two EAs each have a meaningful number of trades - so a normal single-EA report is
+never chopped up. Each resulting strategy gets its own row (`statement · Grid-B`),
+its own drawdown and its own lot size in the Lot Brain.
+
 ## Two views
 
 ### Portfolio

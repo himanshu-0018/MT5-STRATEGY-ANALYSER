@@ -1,3 +1,5 @@
+import { splitDealsByEa } from "./eaSplit";
+
 const num = (s) => {
   if (s == null) return 0;
   const v = parseFloat(String(s).replace(/[\s\u00a0]/g, "").replace(",", "."));
@@ -77,6 +79,17 @@ function scanReport(html) {
   const iTable = html.indexOf("</table>", iDeals);
   if (iTable > 0 && iTable < end) end = iTable;
 
+  // the first row after the Deals marker is the column header
+  let magicIdx = -1;
+  {
+    const hStart = html.indexOf("<tr", iDeals);
+    const hEnd = hStart >= 0 ? html.indexOf("</tr>", hStart) : -1;
+    if (hStart >= 0 && hEnd > hStart) {
+      const header = cellsBetween(html, hStart, hEnd);
+      magicIdx = header.findIndex((c) => /^magic/i.test(c));
+    }
+  }
+
   const deals = [];
   let pos = html.indexOf("<tr", iDeals);
   while (pos >= 0 && pos < end) {
@@ -114,6 +127,7 @@ function scanReport(html) {
                 net: commission + swap + profit,
                 isOut: OUT_DIRS.has(direction),
                 comment: cells[12],
+                magic: magicIdx >= 0 ? cells[magicIdx] : undefined,
               });
               parsedRow = true;
             }
@@ -156,6 +170,10 @@ function parseWithDom(html) {
   for (let i = 0; i < rows.length; i++) {
     if (rows[i] === headerRow) { startIdx = i; break; }
   }
+  let magicIdx = -1;
+  if (startIdx + 1 < rows.length) {
+    magicIdx = Array.from(rows[startIdx + 1].cells).findIndex((c) => /^magic/i.test(cellText(c)));
+  }
 
   const deals = [];
   for (let i = startIdx + 1; i < rows.length; i++) {
@@ -185,6 +203,7 @@ function parseWithDom(html) {
       net: commission + swap + profit,
       isOut: OUT_DIRS.has(direction),
       comment: cellText(cs[12]),
+      magic: magicIdx >= 0 && cs[magicIdx] ? cellText(cs[magicIdx]) : undefined,
     });
   }
   if (!deals.length) throw new Error("No trade deals found in report.");
@@ -192,6 +211,29 @@ function parseWithDom(html) {
 }
 
 /* ------------------------------------------------------------------ */
+
+/**
+ * Parse one file into one or more strategies.
+ *
+ * `splitByEa` is the user's choice from the uploader: when a single file holds
+ * trades from several EAs, the Deals table is split into one report per EA so
+ * each gets its own row, lot size and drawdown instead of being merged into one.
+ */
+export function parseMt5Reports(buffer, fileName, opts = {}) {
+  const single = parseMt5Report(buffer, fileName);
+  if (!opts.splitByEa) return [single];
+  const parts = splitDealsByEa(single.deals);
+  if (!parts || parts.length < 2) return [single];
+  return parts.map((part) => ({
+    ...single,
+    id: `${single.fileName}-${part.tag}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    label: `${single.label} · ${part.tag}`,
+    expert: `${single.label} · ${part.tag}`,
+    eaExpert: part.tag,
+    splitFrom: single.label,
+    deals: part.deals,
+  }));
+}
 
 export function parseMt5Report(buffer, fileName) {
   const html = decode(buffer);

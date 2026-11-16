@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "@/App.css";
 import { Toaster, toast } from "sonner";
 import { FlaskConical, Eraser, LayoutDashboard, BrainCircuit, Loader2, AlertTriangle } from "lucide-react";
-import { parseMt5Report } from "./lib/mt5Parser";
+import { parseMt5Report, parseMt5Reports } from "./lib/mt5Parser";
 import { buildPortfolio, reportSummary, REPORT_COLORS } from "./lib/portfolio";
 import { buildRiskModel, buildPlan, RiskModelTooLargeError } from "./lib/riskBrain";
 import { Uploader } from "./components/Uploader";
@@ -30,6 +30,9 @@ function App() {
   const [enabled, setEnabled] = useState({});
   const [balance, setBalance] = useState("1000");
   const [tab, setTab] = useState("portfolio");
+  // "per-ea": every file is one strategy. "multi": one file may hold several
+  // EAs, which are split into separate strategies by magic number / comment.
+  const [uploadMode, setUploadMode] = useState("per-ea");
 
   const addParsed = (parsed) => {
     if (!parsed.length) return;
@@ -44,6 +47,8 @@ function App() {
     const parsed = [];
     let failed = 0;
     let firstError = "";
+    let splitFiles = 0;
+    let splitStrategies = 0;
     uploadProgress.start(list.length);
     let cancelled = false;
     try {
@@ -53,7 +58,9 @@ function App() {
         uploadProgress.update({ current: f.name, phase: "parsing" });
         await yieldToBrowser(); // let the overlay paint before the parse blocks the thread
         try {
-          parsed.push(parseMt5Report(await f.arrayBuffer(), f.name));
+          const parts = parseMt5Reports(await f.arrayBuffer(), f.name, { splitByEa: uploadMode === "multi" });
+          if (parts.length > 1) { splitFiles += 1; splitStrategies += parts.length; }
+          for (const p of parts) parsed.push(p);
         } catch (err) {
           failed += 1;
           if (!firstError) firstError = `${f.name}: ${err.message}`;
@@ -72,6 +79,9 @@ function App() {
       uploadProgress.finish();
     }
     if (failed) toast.error(`${failed} file${failed === 1 ? "" : "s"} could not be read${firstError ? ` — ${firstError}` : ""}`);
+    if (splitFiles) {
+      toast.success(`${splitFiles} file${splitFiles === 1 ? "" : "s"} contained several EAs - split into ${splitStrategies} strategies`);
+    }
     if (cancelled) toast(`Cancelled - kept ${parsed.length} report${parsed.length === 1 ? "" : "s"}`);
   };
 
@@ -202,11 +212,13 @@ function App() {
                 returns the lot size for every strategy that maximises profit inside that limit.
               </p>
             </div>
-            <div className="qf-rise" style={{ animationDelay: "120ms" }}><Uploader onFiles={handleFiles} /></div>
+            <div className="qf-rise" style={{ animationDelay: "120ms" }}>
+            <Uploader onFiles={handleFiles} mode={uploadMode} onModeChange={setUploadMode} />
+          </div>
           </section>
         ) : (
           <>
-            <Uploader onFiles={handleFiles} compact />
+            <Uploader onFiles={handleFiles} compact mode={uploadMode} onModeChange={setUploadMode} />
             <ReportTable reports={reports} summaries={summaries} enabled={enabled}
               onToggle={toggleReport}
               onRemove={removeReport} />

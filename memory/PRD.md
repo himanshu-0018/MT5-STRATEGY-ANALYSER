@@ -21,6 +21,12 @@ Frontend-only React. `lib/mt5Parser.js` (UTF-16/UTF-8 decode, DOMParser, Deals t
 - $ / % toggle per day (day P&L vs. % of the balance at day open), month navigation across the whole uploaded range + month picker, monthly totals strip (net, trading days, trades, best/worst/avg day, win-day rate), click a day to list its deals with timestamps
 
 
+## Implemented (2026-11) – multi-EA files (upload mode)
+- Uploader asks **before** uploading: "One file per EA" (default) or "Files hold several EAs". The choice is passed to `parseMt5Reports(buffer, name, { splitByEa })`.
+- `lib/eaSplit.js`: splits one Deals table into per-EA strategies. Identity = the Magic column when the export has one, otherwise the EA tag of each trade's **entry** comment; exits inherit their entry's tag (they usually carry `sl 4092.42` / `tp ...`). Tags are normalised (trailing markers/prices/brackets stripped). Untagged deals join the dominant group; a split only happens when a second tag has >= max(3, 5% of trades) so normal single-EA reports are never chopped up.
+- Split strategies are labelled `file · EA`, keep the file's metadata, and get their own deal list, drawdown and lot size. A toast reports how many files were split.
+- 7 tests: tag normalisation (markers, brackets, prices), 3-EA file split, single-EA file not split, empty comments not split, typo-sized group ignored, per-EA mode never splits, each split keeps its own P&L.
+
 ## Implemented (2026-11) – Lot Brain at 342 reports (no limit in practice)
 The dense `reports x timestamps` model (46M numbers for 342 reports) could not size the real book at all.
 - **Sparse model**: one event per deal on the shared timeline (`evStart/evEa/evPpl`) plus per-report `(group, cumulative)` arrays with binary-search lookup. Memory O(deals), evaluation O(deals) instead of O(reports x timestamps).
