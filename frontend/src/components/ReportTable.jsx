@@ -78,7 +78,10 @@ const ReportTableInner = ({ reports, summaries, enabled, onToggle, onRemove }) =
                       {r.eaExpert ? `EA: ${r.eaExpert}` : r.fileName}
                     </div>
                   </C>
-                  <C>{r.symbol} · {r.timeframe}</C>
+                  <C>
+                    <span title={(r.symbols || []).map((x) => `${x.symbol} · ${x.trades} deals`).join("\n") || r.symbol}>{r.symbol}</span>
+                    <span className="text-slate-500"> · {r.timeframe}</span>
+                  </C>
                   <C className="text-slate-400">{fmtDate(s.from)} → {fmtDate(s.to)}</C>
                   <C right>{money(r.initialDeposit)}</C>
                   <C right>{s.trades}</C>

@@ -1,4 +1,4 @@
-import { parseMt5Report, reportLabel } from "./mt5Parser";
+import { parseMt5Report, parseMt5Reports, reportLabel } from "./mt5Parser";
 
 /* Build a report the way MT5 exports it: settings rows, a Deals table, then a
    much larger Orders table that must never be read as deals. */
@@ -103,5 +103,75 @@ describe("mt5 parser", () => {
     const ms = Date.now() - t0;
     expect(r.deals).toHaveLength(800);
     expect(ms).toBeLessThan(1500);
+  });
+});
+
+describe("symbol reporting", () => {
+  const dealRow = (t, symbol, dir, type, pnl) => {
+    const ts = new Date(t).toISOString().replace("T", " ").slice(0, 19).replace(/-/g, ".");
+    return `<tr><td>${ts}</td><td>1</td><td>${symbol}</td><td>${type}</td><td>${dir}</td><td>0.10</td><td>2000.00</td><td>1</td><td>-0.07</td><td>0.00</td><td>${pnl}</td><td>10000.00</td><td>tag</td></tr>`;
+  };
+  const build = (headerSymbol, rows) => `<html><body><table>
+<tr><td>Expert:</td><td>X</td></tr>
+<tr><td>Symbol:</td><td>${headerSymbol}</td></tr>
+<tr><td>Period:</td><td>M15 (2025.01.01 - 2025.12.31)</td></tr>
+<tr><td>Initial Deposit:</td><td>10 000.00</td></tr>
+<th><b>Deals</b></th>
+<tr><td><b>Time</b></td><td><b>Deal</b></td><td><b>Symbol</b></td><td><b>Type</b></td><td><b>Direction</b></td><td><b>Volume</b></td><td><b>Price</b></td><td><b>Order</b></td><td><b>Commission</b></td><td><b>Swap</b></td><td><b>Profit</b></td><td><b>Balance</b></td><td><b>Comment</b></td></tr>
+${rows.join("\n")}
+</table></body></html>`;
+
+  const t0 = Date.UTC(2025, 0, 2, 6);
+
+  test("a single-symbol report keeps the symbol", () => {
+    const r = parseMt5Report(buf(build("BTCUSD", [
+      dealRow(t0, "BTCUSD", "in", "buy", 0),
+      dealRow(t0 + 3600e3, "BTCUSD", "out", "sell", 10),
+    ])), "one.html");
+    expect(r.symbol).toBe("BTCUSD");
+    expect(r.symbols).toEqual([{ symbol: "BTCUSD", trades: 2 }]);
+  });
+
+  test("uses the symbols actually traded, not the header", () => {
+    const rows = [];
+    for (let i = 0; i < 6; i++) {
+      rows.push(dealRow(t0 + i * 3600e3, "BTCUSD", "in", "buy", 0));
+      rows.push(dealRow(t0 + i * 3600e3 + 60e3, "BTCUSD", "out", "sell", 10));
+    }
+    for (let i = 0; i < 2; i++) {
+      rows.push(dealRow(t0 + (i + 7) * 3600e3, "XAUUSD", "in", "buy", 0));
+      rows.push(dealRow(t0 + (i + 7) * 3600e3 + 60e3, "XAUUSD", "out", "sell", 8));
+    }
+    const r = parseMt5Report(buf(build("BTCUSD", rows)), "mixed.html");
+    expect(r.symbol).toBe("BTCUSD + XAUUSD");
+    expect(r.symbols).toEqual([{ symbol: "BTCUSD", trades: 12 }, { symbol: "XAUUSD", trades: 4 }]);
+    expect(r.headerSymbol).toBe("BTCUSD");
+  });
+
+  test("three or more symbols collapse to the dominant one plus a count", () => {
+    const rows = [];
+    ["BTCUSD", "BTCUSD", "XAUUSD", "EURUSD"].forEach((sym, i) => {
+      rows.push(dealRow(t0 + i * 3600e3, sym, "in", "buy", 0));
+      rows.push(dealRow(t0 + i * 3600e3 + 60e3, sym, "out", "sell", 5));
+    });
+    const r = parseMt5Report(buf(build("BTCUSD", rows)), "three.html");
+    expect(r.symbol).toBe("BTCUSD +2");
+    expect(r.symbols).toHaveLength(3);
+  });
+
+  test("a split strategy reports its own symbols", () => {
+    const rows = [];
+    for (let i = 0; i < 4; i++) {
+      rows.push(dealRow(t0 + i * 7200e3, "BTCUSD", "in", "buy", 0).replace("<td>tag</td>", "<td>EA-A</td>"));
+      rows.push(dealRow(t0 + i * 7200e3 + 60e3, "BTCUSD", "out", "sell", 9).replace("<td>tag</td>", "<td>sl 1.0</td>"));
+    }
+    for (let i = 0; i < 4; i++) {
+      rows.push(dealRow(t0 + i * 7200e3 + 3600e3, "XAUUSD", "in", "buy", 0).replace("<td>tag</td>", "<td>EA-B</td>"));
+      rows.push(dealRow(t0 + i * 7200e3 + 3660e3, "XAUUSD", "out", "sell", 7).replace("<td>tag</td>", "<td>sl 1.0</td>"));
+    }
+    const parts = parseMt5Reports(buf(build("BTCUSD", rows)), "two.html", { splitByEa: true });
+    expect(parts).toHaveLength(2);
+    expect(parts[0].symbol).toBe("BTCUSD");
+    expect(parts[1].symbol).toBe("XAUUSD");
   });
 });

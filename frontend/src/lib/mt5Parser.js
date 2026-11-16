@@ -51,6 +51,28 @@ function cellsBetween(s, from, to) {
   return out;
 }
 
+/**
+ * The symbols a strategy actually traded, most-traded first.
+ *
+ * The report header names the symbol the tester was launched on, but an EA can
+ * trade other symbols too. The deals are the truth.
+ */
+export function symbolSummary(deals) {
+  const counts = new Map();
+  for (const d of deals || []) {
+    const sym = String(d.symbol || "").trim();
+    if (sym) counts.set(sym, (counts.get(sym) || 0) + 1);
+  }
+  const list = [...counts.entries()]
+    .map(([symbol, trades]) => ({ symbol, trades }))
+    .sort((a, b) => b.trades - a.trades || a.symbol.localeCompare(b.symbol));
+  let display = "";
+  if (list.length === 1) display = list[0].symbol;
+  else if (list.length === 2) display = `${list[0].symbol} + ${list[1].symbol}`;
+  else if (list.length > 2) display = `${list[0].symbol} +${list.length - 1}`;
+  return { list, display };
+}
+
 const findValue = (cells, label) => {
   const want = label.toLowerCase();
   for (let i = 0; i < cells.length; i++) {
@@ -226,6 +248,8 @@ export function parseMt5Reports(buffer, fileName, opts = {}) {
   if (!parts || parts.length < 2) return [single];
   return parts.map((part) => ({
     ...single,
+    symbols: symbolSummary(part.deals).list,
+    symbol: symbolSummary(part.deals).display || single.symbol,
     id: `${single.fileName}-${part.tag}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     label: `${single.label} · ${part.tag}`,
     expert: `${single.label} · ${part.tag}`,
@@ -255,13 +279,17 @@ export function parseMt5Report(buffer, fileName) {
   // name is what they recognise). The EA name is kept for tooltips/subtitles.
   const label = reportLabel(fileName) || eaExpert || fileName;
   const period = findValue(cells, "Period:") || "";
+  const sym = symbolSummary(parsed.deals);
+  const headerSymbol = findValue(cells, "Symbol:") || "";
   return {
     id: `${fileName}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     fileName,
     label,
     expert: label,
     eaExpert,
-    symbol: findValue(cells, "Symbol:") || parsed.deals[0].symbol,
+    symbols: sym.list,
+    headerSymbol,
+    symbol: sym.display || headerSymbol || parsed.deals[0].symbol,
     period,
     timeframe: period.split(" ")[0],
     initialDeposit: num(findValue(cells, "Initial Deposit:")) || 1000,

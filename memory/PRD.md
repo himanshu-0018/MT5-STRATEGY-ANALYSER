@@ -25,6 +25,7 @@ Frontend-only React. `lib/mt5Parser.js` (UTF-16/UTF-8 decode, DOMParser, Deals t
 - Uploader asks **before** uploading: "One file per EA" (default) or "Files hold several EAs". The choice is passed to `parseMt5Reports(buffer, name, { splitByEa })`.
 - `lib/eaSplit.js`: splits one Deals table into per-EA strategies. Identity = the Magic column when the export has one, otherwise the EA tag of each trade's **entry** comment; exits inherit their entry's tag (they usually carry `sl 4092.42` / `tp ...`). Tags are normalised (trailing markers/prices/brackets stripped). Untagged deals join the dominant group; a split only happens when a second tag has >= max(3, 5% of trades) so normal single-EA reports are never chopped up.
 - Split strategies are labelled `file · EA`, keep the file's metadata, and get their own deal list, drawdown and lot size. A toast reports how many files were split.
+- The **symbol** is derived from the deals actually traded (`symbolSummary`), not from the report header: 1 symbol shown as-is, 2 as `BTCUSD + XAUUSD`, 3+ as `BTCUSD +2`, with the full breakdown in the tooltip. Split strategies get the symbols of their own trades. (The user's 342 files are all single-symbol, but a multi-EA statement file is not.)
 - 7 tests: tag normalisation (markers, brackets, prices), 3-EA file split, single-EA file not split, empty comments not split, typo-sized group ignored, per-EA mode never splits, each split keeps its own P&L.
 
 ## Implemented (2026-11) – Lot Brain at 342 reports (no limit in practice)

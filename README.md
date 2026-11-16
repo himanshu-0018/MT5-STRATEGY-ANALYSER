@@ -33,6 +33,11 @@ Chosen **before** you upload, in the uploader card:
 | **One file per EA** | Each Strategy Tester export is its own strategy (the normal case). Every file becomes one row, labelled with the file name. |
 | **Files hold several EAs** | A single file contains trades from many EAs - e.g. an account statement or merged history. |
 
+The **symbol** shown for each strategy is derived from the deals it actually
+traded, not from the report header (an EA launched on BTCUSD can still trade
+XAUUSD): a single symbol is shown as-is, two as `BTCUSD + XAUUSD`, and more as
+`BTCUSD +2` with the full breakdown in the tooltip.
+
 In the second mode the Deals table is split into one strategy per EA: the EA tag
 comes from each trade's **entry** comment (its exits inherit it, since they
 usually just say `sl 4092.42`), a **Magic** column wins when the export has one,
