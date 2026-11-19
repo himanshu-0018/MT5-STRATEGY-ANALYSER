@@ -46,6 +46,11 @@ two EAs each have a meaningful number of trades - so a normal single-EA report i
 never chopped up. Each resulting strategy gets its own row (`statement · Grid-B`),
 its own drawdown and its own lot size in the Lot Brain.
 
+Splitting can over-split - one EA may label its trades with four different
+comments (`CG-M5`, `CG-H1`, `CG-GRID`, `CG-SCALP`). Click **Merge strategies**,
+tick the rows that belong to the same EA, type its name and they are joined back
+into one strategy (deals merged on one timeline, nothing lost).
+
 ## Two views
 
 ### Portfolio

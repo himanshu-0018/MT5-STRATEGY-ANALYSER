@@ -15,7 +15,8 @@ const COL_COUNT = 11;
 const H = ({ children, right }) => <th className={`qf-label py-3 px-3 font-medium ${right ? "text-right" : "text-left"}`}>{children}</th>;
 const C = ({ children, right, className = "" }) => <td className={`py-2 px-3 font-mono text-xs ${right ? "text-right" : ""} ${className}`}>{children}</td>;
 
-const ReportTableInner = ({ reports, summaries, enabled, onToggle, onRemove }) => {
+const ReportTableInner = ({ reports, summaries, enabled, onToggle, onRemove, mergeMode, mergeSel, onMergeMode, onMergeSel, onMerge }) => {
+  const [mergeName, setMergeName] = useState("");
   const scroller = useRef(null);
   const [range, setRange] = useState({ start: 0, end: Math.min(reports.length, 24) });
 
@@ -47,14 +48,26 @@ const ReportTableInner = ({ reports, summaries, enabled, onToggle, onRemove }) =
     <div data-testid="per-report-table-container" className="qf-card qf-rise p-5" style={{ animationDelay: "60ms" }}>
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
         <h2 className="font-heading text-base md:text-lg font-semibold text-slate-100">Individual Reports</h2>
-        <span className="qf-label">{reports.length} reports · {activeCount} active</span>
+        <div className="flex items-center gap-3">
+          <span className="qf-label">{reports.length} reports · {activeCount} active</span>
+          {reports.length > 1 && (
+            <button
+              data-testid="merge-mode-toggle"
+              onClick={() => onMergeMode()}
+              title="Join strategies that belong to the same EA into one"
+              className={`px-2.5 py-1 border text-[11px] font-mono transition-colors ${mergeMode ? "border-cyan-500/60 bg-cyan-500/15 text-cyan-300" : "border-slate-700 text-slate-400 hover:text-slate-200"}`}
+            >
+              {mergeMode ? "Cancel merge" : "Merge strategies"}
+            </button>
+          )}
+        </div>
       </div>
       <p className="qf-label mb-4">Each file analysed separately on its own initial deposit</p>
 
       <div ref={scroller} onScroll={recalc} className="max-h-[620px] overflow-auto">
         <table className="w-full min-w-[900px]">
           <thead className="sticky top-0 z-10 bg-[#111827] border-b border-slate-800">
-            <tr><H>Use</H><H>Strategy</H><H>Symbol / TF</H><H>Range</H><H right>Deposit</H><H right>Trades</H><H right>Net Profit</H><H right>PF</H><H right>Win %</H><H right>Max DD</H><H /></tr>
+            <tr><H>{mergeMode ? "Merge" : "Use"}</H><H>Strategy</H><H>Symbol / TF</H><H>Range</H><H right>Deposit</H><H right>Trades</H><H right>Net Profit</H><H right>PF</H><H right>Win %</H><H right>Max DD</H><H /></tr>
           </thead>
           <tbody>
             {padTop > 0 && (
@@ -68,7 +81,13 @@ const ReportTableInner = ({ reports, summaries, enabled, onToggle, onRemove }) =
               return (
                 <tr key={r.id} data-testid={`per-report-row-${i}`} style={{ height: ROW_H }}
                   className={`border-b border-slate-800/60 transition-colors hover:bg-slate-800/30 ${enabled[r.id] ? "" : "opacity-40"}`}>
-                  <C><Checkbox data-testid={`report-include-checkbox-${i}`} checked={!!enabled[r.id]} onCheckedChange={() => onToggle(r.id)} /></C>
+                  <C>
+                    {mergeMode ? (
+                      <Checkbox data-testid={`merge-check-${i}`} checked={!!mergeSel?.has(r.id)} onCheckedChange={() => onMergeSel(r.id)} />
+                    ) : (
+                      <Checkbox data-testid={`report-include-checkbox-${i}`} checked={!!enabled[r.id]} onCheckedChange={() => onToggle(r.id)} />
+                    )}
+                  </C>
                   <C className="font-sans text-sm text-slate-100">
                     <div className="flex items-center gap-2">
                       <span className="h-2 w-2 shrink-0" style={{ background: REPORT_COLORS[i % REPORT_COLORS.length] }} />
@@ -116,6 +135,27 @@ const ReportTableInner = ({ reports, summaries, enabled, onToggle, onRemove }) =
           </tbody>
         </table>
       </div>
+      {mergeMode && (
+        <div className="mt-3 flex flex-wrap items-center gap-3 border border-cyan-500/30 bg-cyan-500/5 px-3 py-2">
+          <span className="qf-label text-cyan-300">{mergeSel?.size || 0} selected</span>
+          <input
+            data-testid="merge-name-input"
+            value={mergeName}
+            onChange={(e) => setMergeName(e.target.value)}
+            placeholder="Name this EA (e.g. CG) - blank keeps the file name"
+            className="flex-1 min-w-[240px] bg-slate-900 border border-slate-700 px-2 py-1 text-xs text-slate-200 font-mono outline-none focus:border-cyan-500/60"
+          />
+          <button
+            data-testid="merge-confirm"
+            disabled={(mergeSel?.size || 0) < 2}
+            onClick={() => onMerge(mergeSel, mergeName)}
+            className="px-3 py-1 bg-cyan-500/20 border border-cyan-500/50 text-cyan-200 text-[11px] font-mono disabled:opacity-40 disabled:cursor-not-allowed hover:bg-cyan-500/30 transition-colors"
+          >
+            Merge into one EA
+          </button>
+          <button onClick={() => { onMergeMode(false); setMergeName(""); }} className="px-2 py-1 text-[11px] font-mono text-slate-400 hover:text-slate-200">Cancel</button>
+        </div>
+      )}
       <p className="qf-label mt-3">Scroll to browse all {reports.length} reports - only the visible rows are drawn.</p>
     </div>
   );

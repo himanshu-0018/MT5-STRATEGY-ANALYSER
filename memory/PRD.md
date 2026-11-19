@@ -21,6 +21,12 @@ Frontend-only React. `lib/mt5Parser.js` (UTF-16/UTF-8 decode, DOMParser, Deals t
 - $ / % toggle per day (day P&L vs. % of the balance at day open), month navigation across the whole uploaded range + month picker, monthly totals strip (net, trading days, trades, best/worst/avg day, win-day rate), click a day to list its deals with timestamps
 
 
+## Implemented (2026-11) – merge over-split strategies into one EA
+- A multi-EA file can over-split: one EA may tag its trades with four comments (`CG-M5`, `CG-H1`, `CG-GRID`, `CG-SCALP`), which the splitter cannot know belong together.
+- Report table gains **Merge strategies**: tick rows, type the EA name, confirm. `lib/mergeReports.js` (`buildMergedReport`) concatenates the deals in time order (nothing discarded), recomputes symbols, keeps the deposit/file and records `mergedFrom`. Blank name falls back to the shared file name; with no name the EA tags are joined (`CG-M5 + CG-H1 + ...`).
+- The merged row takes the first selected row's place and keeps the enabled state; the Lot Brain then sizes it as one EA.
+- 6 tests: deal preservation + order + P&L sum, typed label, blank-name fallback, symbol recompute, minimum of two, deposit/file kept.
+
 ## Implemented (2026-11) – monthly matrix, hide toggle, "Use all" mode
 - **Monthly Profit**: full-width section, months down the left and one column per strategy across (the layout the user asked for, matching his reference). No column cap - every loaded report gets its own column - the month column is sticky when the book is wide, and the row/column totals are kept. 14 reports fit a 1600px screen exactly; more scroll sideways with the month column pinned.
 - **Hide/unhide** per report: an eye button next to the bin toggles the same enabled state as the Use checkbox, greys the row and shows a HIDDEN badge - the report stays in the list.

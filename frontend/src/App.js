@@ -3,6 +3,7 @@ import "@/App.css";
 import { Toaster, toast } from "sonner";
 import { FlaskConical, Eraser, LayoutDashboard, BrainCircuit, Loader2, AlertTriangle } from "lucide-react";
 import { parseMt5Report, parseMt5Reports } from "./lib/mt5Parser";
+import { buildMergedReport } from "./lib/mergeReports";
 import { buildPortfolio, reportSummary, REPORT_COLORS } from "./lib/portfolio";
 import { buildRiskModel, buildPlan, RiskModelTooLargeError } from "./lib/riskBrain";
 import { Uploader } from "./components/Uploader";
@@ -33,6 +34,12 @@ function App() {
   // "per-ea": every file is one strategy. "multi": one file may hold several
   // EAs, which are split into separate strategies by magic number / comment.
   const [uploadMode, setUploadMode] = useState("per-ea");
+  // merging: several detected strategies (e.g. four comment tags of one EA) can
+  // be joined into a single strategy the app treats as one EA
+  const [mergeMode, setMergeMode] = useState(false);
+  const [mergeSel, setMergeSel] = useState(() => new Set());
+  const reportsRef = useRef(reports);
+  reportsRef.current = reports;
 
   const addParsed = (parsed) => {
     if (!parsed.length) return;
@@ -143,6 +150,48 @@ function App() {
   const toggleReport = useCallback((id) => setEnabled((e) => ({ ...e, [id]: !e[id] })), []);
   const removeReport = useCallback((id) => setReports((r) => r.filter((x) => x.id !== id)), []);
 
+  const toggleMergeMode = useCallback((on) => {
+    setMergeMode((prev) => (on === undefined ? !prev : on));
+    setMergeSel(() => new Set());
+  }, []);
+
+  const toggleMergeSel = useCallback((id) => {
+    setMergeSel((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  /**
+   * Join several detected strategies into one EA.
+   *
+   * Their deals are merged onto one timeline (nothing is discarded, order kept),
+   * the symbols are recomputed and the merged strategy takes the first one's
+   * place. The Lot Brain then sizes it as a single EA.
+   */
+  const mergeSelected = useCallback((ids, rawName) => {
+    const picked = reportsRef.current.filter((r) => ids.has(r.id));
+    const merged = buildMergedReport(picked, rawName);
+    if (!merged) return;
+    setReports((prev) => {
+      const firstIdx = prev.findIndex((r) => ids.has(r.id));
+      const before = prev.slice(0, firstIdx).filter((r) => !ids.has(r.id));
+      const after = prev.slice(firstIdx).filter((r) => !ids.has(r.id));
+      return [...before, merged, ...after];
+    });
+    setEnabled((prev) => {
+      const next = { ...prev };
+      const wasOn = picked.some((p) => prev[p.id]);
+      for (const p of picked) delete next[p.id];
+      next[merged.id] = wasOn;
+      return next;
+    });
+    setMergeMode(false);
+    setMergeSel(() => new Set());
+    toast.success(`Merged ${picked.length} strategies into ${merged.expert}`);
+  }, []);
+
   return (
     <div className="qf-app min-h-screen">
       <Toaster theme="dark" position="bottom-right" />
@@ -221,7 +270,12 @@ function App() {
             <Uploader onFiles={handleFiles} compact mode={uploadMode} onModeChange={setUploadMode} />
             <ReportTable reports={reports} summaries={summaries} enabled={enabled}
               onToggle={toggleReport}
-              onRemove={removeReport} />
+              onRemove={removeReport}
+              mergeMode={mergeMode}
+              mergeSel={mergeSel}
+              onMergeMode={toggleMergeMode}
+              onMergeSel={toggleMergeSel}
+              onMerge={mergeSelected} />
             {tab === "brain" ? (
               active.length ? (
                 modelError ? (
