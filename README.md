@@ -173,6 +173,10 @@ How it stays fast:
 - **Month/day buckets** reuse cached keys instead of allocating a `Date` per deal.
 - **Trade pairing is lazy** - deals are paired only when a calendar day is opened.
 - **The equity curve is sampled** while walking (the chart only draws ~2,500 points).
+- **The Lot Brain runs in a Web Worker** - the tab stays responsive while a big
+  book is being sized, and a live "Calculating the plan…" card shows the mode,
+  budget, lot step and elapsed time. (Falls back to computing inline where
+  workers are unavailable.)
 - **The Lot Brain sizes the whole book.** The model is sparse (one entry per
   deal, not a reports x timestamps matrix), the cutting-plane LP is scaled and
   prunes slack constraints, and the solved direction is cached - so a **342

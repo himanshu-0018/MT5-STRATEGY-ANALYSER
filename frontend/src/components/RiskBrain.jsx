@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   BrainCircuit,
@@ -18,7 +18,8 @@ import {
   Ban,
 } from "lucide-react";
 import { buildPortfolio, money } from "../lib/portfolio";
-import { buildPlan, efficientFrontier, monteCarlo, scaleReports, fmtLot } from "../lib/riskBrain";
+import { buildPlan, fmtLot } from "../lib/riskBrain";
+import { runBrain } from "../lib/planClient";
 import { buildInsights } from "../lib/insights";
 import { PlanEquityChart, FrontierChart, MonteCarloChart } from "./BrainCharts";
 import { MonthlyCompare } from "./MonthlyCompare";
@@ -75,6 +76,28 @@ const Compare = ({ label, before, after, delta, deltaPct, tone, deltaTone = "tex
   </div>
 );
 
+const MODE_LABEL = { maxprofit: "Max profit", uniform: "Scale all", riskparity: "Equal risk", allin: "Use all", custom: "Your own lots" };
+
+const Spinner = () => (
+  <span className="inline-block h-4 w-4 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" aria-hidden="true" />
+);
+
+const ComputingCard = ({ label, budget, step, elapsed, cover }) => (
+  <div
+    data-testid="brain-computing"
+    className={cover ? "qf-card p-10 flex flex-col items-center justify-center gap-3 text-center" : "qf-card border-l-2 border-l-cyan-400 p-3 flex flex-wrap items-center gap-3"}
+  >
+    <Spinner />
+    <div className={cover ? "" : "flex-1 min-w-[220px]"}>
+      <div className="font-heading text-sm text-slate-100">Calculating the plan…</div>
+      <div className="qf-label mt-0.5">
+        {label} · {budget} drawdown budget · {step} lot step
+      </div>
+    </div>
+    <div className="font-mono text-xs text-cyan-300">{elapsed.toFixed(1)}s</div>
+  </div>
+);
+
 export const RiskBrain = ({ model, start, baselinePortfolio }) => {
   const [budgetInput, setBudgetInput] = useState("200");
   const [unit, setUnit] = useState("usd");
@@ -99,40 +122,80 @@ export const RiskBrain = ({ model, start, baselinePortfolio }) => {
     [model, dropLosers],
   );
 
-  const shown = useMemo(() => {
-    if (!model) return null;
-    return buildPlan(model, {
-      budget,
-      mode: customLots ? "custom" : mode,
-      safety,
-      lotStep: step,
-      maxLot: capLot,
-      customLots,
-      blocked,
-      riskCap: capShare,
-    });
-  }, [model, budget, mode, safety, step, capLot, customLots, blocked, capShare]);
+  // The optimiser runs in a Web Worker: a 300-report pass takes seconds, and the
+  // page must stay usable (and visibly busy) while it happens.
+  const [result, setResult] = useState(null);
+  const [computing, setComputing] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [computeError, setComputeError] = useState(null);
+  const firstRun = useRef(true);
 
-  const frontier = useMemo(
-    () => (model ? efficientFrontier(model, { budget, maxLot: capLot, riskCap: capShare }) : []),
-    [model, budget, capLot, capShare],
-  );
-  const mc = useMemo(
-    () => (model && shown ? monteCarlo(model, shown.lots, { histDD: shown.dd, sims: 400, budget: shown.effectiveBudget }) : null),
-    [model, shown],
-  );
-  const insights = useMemo(
-    () => (model && shown ? buildInsights({ model, plan: shown, baseline: shown.before, mc, budget, start, lotStep: step }) : []),
-    [model, shown, mc, budget, start, step],
-  );
-  const planPortfolio = useMemo(() => {
-    if (!model || !shown) return null;
-    const rs = scaleReports(model, shown.lots, start);
-    return rs.length ? buildPortfolio(rs, start) : null;
-  }, [model, shown, start]);
+  useEffect(() => {
+    if (!model) return undefined;
+    let alive = true;
+    const t0 = performance.now();
+    setComputing(true);
+    setComputeError(null);
+    setElapsed(0);
+    const tick = setInterval(() => { if (alive) setElapsed((performance.now() - t0) / 1000); }, 100);
+    // yield once so the busy state paints before the work starts
+    const timer = setTimeout(() => {
+      runBrain(model, {
+        budget,
+        mode: customLots ? "custom" : mode,
+        safety,
+        lotStep: step,
+        maxLot: capLot,
+        customLots,
+        blocked,
+        riskCap: capShare,
+        start,
+      })
+        .then((r) => {
+          if (!alive) return;
+          // keep the busy state up for a beat even when the answer is instant,
+          // otherwise it flickers and looks like nothing happened
+          const settle = Math.max(0, 380 - (performance.now() - t0));
+          setTimeout(() => {
+            if (!alive) return;
+            setResult(r);
+            setComputing(false);
+            clearInterval(tick);
+            firstRun.current = false;
+          }, settle);
+        })
+        .catch((err) => { if (!alive) return; setComputeError(String((err && err.message) || err)); setComputing(false); clearInterval(tick); });
+    }, 40);
+    return () => { alive = false; clearTimeout(timer); clearInterval(tick); };
+  }, [model, budget, mode, safety, step, capLot, customLots, blocked, capShare, start]);
 
-  if (!model || !shown) {
+  const shown = result?.plan || null;
+  const frontier = result?.frontier || [];
+  const mc = result?.mc || null;
+  const insights = result?.insights || [];
+  const planPortfolio = result?.portfolio || null;
+
+  if (!model) {
     return <p className="text-sm text-slate-500">Enable at least one report to size it.</p>;
+  }
+  if (!shown) {
+    if (computeError) {
+      return (
+        <div data-testid="brain-compute-error" className="qf-card border-l-2 border-l-red-500 p-6">
+          <h2 className="font-heading text-base font-semibold text-slate-100">Could not size this book</h2>
+          <p className="mt-1 text-xs text-slate-400 font-mono">{computeError}</p>
+        </div>
+      );
+    }
+    return (
+      <ComputingCard
+        cover
+        label={MODE_LABEL[customLots ? "custom" : mode] || mode}
+        budget={money(budget)}
+        step={step.toFixed(2)}
+        elapsed={elapsed}
+      />
+    );
   }
 
   const minimumCands = model.eas
@@ -196,6 +259,14 @@ export const RiskBrain = ({ model, start, baselinePortfolio }) => {
 
   return (
     <div className="space-y-6">
+      {computing && (
+        <ComputingCard
+          label={MODE_LABEL[customLots ? "custom" : mode] || mode}
+          budget={money(budget * safety)}
+          step={step.toFixed(2)}
+          elapsed={elapsed}
+        />
+      )}
       {/* ---------------------------------------------------------- controls */}
       <section data-testid="brain-controls" className="qf-card qf-rise p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">

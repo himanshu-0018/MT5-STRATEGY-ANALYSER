@@ -21,6 +21,12 @@ Frontend-only React. `lib/mt5Parser.js` (UTF-16/UTF-8 decode, DOMParser, Deals t
 - $ / % toggle per day (day P&L vs. % of the balance at day open), month navigation across the whole uploaded range + month picker, monthly totals strip (net, trading days, trades, best/worst/avg day, win-day rate), click a day to list its deals with timestamps
 
 
+## Implemented (2026-11) – Lot Brain runs in a worker with a live progress card
+- The optimiser used to run inside `useMemo` during render, freezing the tab with no feedback when the user changed mode/budget/risk settings.
+- `brainCompute.js` bundles buildPlan + the scaled "after" portfolio (light: curve/months/stats) + Monte Carlo + frontier + insights; `plan.worker.js` runs it in a Web Worker and `planClient.js` manages the worker, caches the model identity, and falls back to inline computing if workers are unavailable or error.
+- RiskBrain now computes in an effect with `computing`/`elapsed`/`error` state: a "Calculating the plan…" card (first load) or a bar above the results (recalculations) shows the mode, drawdown budget, lot step and a live elapsed timer; the busy state is kept for a minimum ~380ms so it never flickers.
+- Verified: 200 reports, changing a mode keeps the main thread responsive (ping 6ms) and the bar reads "MAX PROFIT · $200.00 DRAWDOWN BUDGET · 0.01 LOT STEP".
+
 ## Implemented (2026-11) – merge over-split strategies into one EA
 - A multi-EA file can over-split: one EA may tag its trades with four comments (`CG-M5`, `CG-H1`, `CG-GRID`, `CG-SCALP`), which the splitter cannot know belong together.
 - Report table gains **Merge strategies**: tick rows, type the EA name, confirm. `lib/mergeReports.js` (`buildMergedReport`) concatenates the deals in time order (nothing discarded), recomputes symbols, keeps the deposit/file and records `mergedFrom`. Blank name falls back to the shared file name; with no name the EA tags are joined (`CG-M5 + CG-H1 + ...`).
