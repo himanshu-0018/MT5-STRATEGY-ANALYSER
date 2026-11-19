@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Trash2, Eye, EyeOff } from "lucide-react";
 import { Checkbox } from "./ui/checkbox";
 import { money, fmtDate, REPORT_COLORS } from "../lib/portfolio";
 
@@ -76,6 +76,7 @@ const ReportTableInner = ({ reports, summaries, enabled, onToggle, onRemove }) =
                     </div>
                     <div className="text-[11px] text-slate-500 font-mono mt-0.5 truncate max-w-[260px]">
                       {r.eaExpert ? `EA: ${r.eaExpert}` : r.fileName}
+                      {!enabled[r.id] && <span className="ml-2 px-1 py-0.5 border border-slate-600 text-[9px] tracking-wider text-slate-400">HIDDEN</span>}
                     </div>
                   </C>
                   <C>
@@ -90,9 +91,19 @@ const ReportTableInner = ({ reports, summaries, enabled, onToggle, onRemove }) =
                   <C right>{(s.winRate * 100).toFixed(1)}%</C>
                   <C right className="text-red-400">-{money(s.dd.amount)} <span className="text-slate-500">({(s.dd.pct * 100).toFixed(2)}%)</span></C>
                   <C right>
-                    <button data-testid={`report-remove-button-${i}`} onClick={() => onRemove(r.id)} className="text-slate-500 hover:text-red-400 transition-colors">
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        data-testid={`report-hide-button-${i}`}
+                        onClick={() => onToggle(r.id)}
+                        title={enabled[r.id] ? "Hide this report from the analysis (keeps it in the list)" : "Bring this report back into the analysis"}
+                        className={`transition-colors ${enabled[r.id] ? "text-slate-500 hover:text-cyan-300" : "text-cyan-400 hover:text-cyan-200"}`}
+                      >
+                        {enabled[r.id] ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                      </button>
+                      <button data-testid={`report-remove-button-${i}`} onClick={() => onRemove(r.id)} title="Remove from the list entirely" className="text-slate-500 hover:text-red-400 transition-colors">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </C>
                 </tr>
               );

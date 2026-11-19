@@ -275,10 +275,8 @@ function App() {
                 <EquityChart p={portfolio} />
                 <DrawdownWindow p={portfolio} colorOf={colorOf} />
                 <ProfitCalendar p={portfolio} colorOf={colorOf} />
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
-                  <MonthlyTable p={portfolio} reports={active} />
-                  <WorstDays p={portfolio} colorOf={colorOf} />
-                </div>
+                <MonthlyTable p={portfolio} reports={active} />
+                <WorstDays p={portfolio} colorOf={colorOf} />
               </>
             ) : (
               <p data-testid="no-active-reports" className="text-sm text-slate-500">Enable at least one report to see the combined portfolio.</p>

@@ -21,6 +21,11 @@ Frontend-only React. `lib/mt5Parser.js` (UTF-16/UTF-8 decode, DOMParser, Deals t
 - $ / % toggle per day (day P&L vs. % of the balance at day open), month navigation across the whole uploaded range + month picker, monthly totals strip (net, trading days, trades, best/worst/avg day, win-day rate), click a day to list its deals with timestamps
 
 
+## Implemented (2026-11) – monthly matrix, hide toggle, "Use all" mode
+- **Monthly Profit** is now its own full-width section (like Individual Reports and the balance curve). The matrix is transposed - strategies are rows, periods are columns - so adding strategies grows the table downwards instead of forcing horizontal scrolling. Histories over 24 months collapse to one column per YEAR automatically (with a Months/Years switch; months at that density get real column widths and scroll deliberately rather than overlapping). Top 40 strategies are shown individually, the rest summed in a "+N more" row; amounts abbreviate above 14 months.
+- **Hide/unhide** per report: an eye button next to the bin toggles the same enabled state as the Use checkbox, greys the row and shows a HIDDEN badge - the report stays in the list.
+- **Lot Brain "Use all" mode**: every loaded strategy keeps at least one lot step (0.01) - nothing can be dropped, lots can still go up or down. Implemented as a floor in the LP (`w = floor + x`), with cuts accounting for the floor's contribution. If the minimum book alone breaches the budget it returns that book and a warning quoting the needed budget instead of silently shrinking strategies away.
+
 ## Implemented (2026-11) – multi-EA files (upload mode)
 - Uploader asks **before** uploading: "One file per EA" (default) or "Files hold several EAs". The choice is passed to `parseMt5Reports(buffer, name, { splitByEa })`.
 - `lib/eaSplit.js`: splits one Deals table into per-EA strategies. Identity = the Magic column when the export has one, otherwise the EA tag of each trade's **entry** comment; exits inherit their entry's tag (they usually carry `sl 4092.42` / `tp ...`). Tags are normalised (trailing markers/prices/brackets stripped). Untagged deals join the dominant group; a split only happens when a second tag has >= max(3, 5% of trades) so normal single-EA reports are never chopped up.

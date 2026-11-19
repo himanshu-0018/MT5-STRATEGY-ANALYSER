@@ -358,11 +358,22 @@ export function maxProfitLots(model, budget, opts = {}) {
   const blocked = opts.blocked;
   const cap = capsFor(model, budget, maxLot, blocked, opts.riskCap || 1);
 
+  // Optional per-strategy floor: every strategy keeps at least this many lots,
+  // so nothing can be dropped - the solver only decides how much ABOVE it.
+  const floor = opts.floorLots ? opts.floorLots.map((v, i) => Math.min(Math.max(0, v), cap[i])) : null;
+  if (floor) {
+    const floorEV = walk(equityAt(model, floor), model.T);
+    if (floorEV.dd > budget * (1 + 1e-9)) {
+      // even the smallest allowed book breaches the budget - nothing to solve
+      return { lots: floor, iters: 0, converged: false, infeasible: true, cap, floor, minDD: floorEV.dd };
+    }
+  }
+
   // Work in units of each strategy's own cap (w = scale * u, u in [0,1]).
   // The raw LP mixes caps from 0.001 to 100 lots and window coefficients that
   // span orders of magnitude, which makes the simplex crawl through degenerate
   // pivots. This scaling is an exact reparametrisation of the same problem.
-  const scale = cap.map((c) => (c > 0 ? c : 1));
+  const scale = cap.map((c, i) => { const room = c - (floor ? floor[i] : 0); return room > 0 ? room : 1; });
   const profit = eas.map((e, i) => (blocked && blocked[i] ? 0 : e.totalPerLot * scale[i]));
 
   const capRows = [];
@@ -380,16 +391,24 @@ export function maxProfitLots(model, budget, opts = {}) {
     if (seen.has(key)) return false;
     seen.add(key);
     const row = eas.map((_, i) => (cumAt(model, i, p) - cumAt(model, i, t)) * scale[i]);
+    // the floor already contributes <a_i, floor_i> to this window
+    let fixed = 0;
+    if (floor) for (let i = 0; i < m; i++) fixed += (cumAt(model, i, p) - cumAt(model, i, t)) * floor[i];
+    const room = budget - fixed;
+    if (room < 0) return false; // cannot happen after the floor check, kept for safety
     // normalise the row so every cut has comparable magnitude (same half-space)
     let norm = 0;
     for (const v of row) norm = Math.max(norm, Math.abs(v));
     if (norm < 1e-12) return false;
-    cutRows.push({ a: row.map((v) => v / norm), b: budget / norm, key, at });
+    cutRows.push({ a: row.map((v) => v / norm), b: room / norm, key, at });
     return true;
   };
 
   // Seed with several windows from an equal-risk mix so the first LP is sharp.
-  const seedLots = eas.map((e, i) => (cap[i] > 0 ? Math.min(cap[i], (budget / m) / Math.max(e.ddPerLot, budget * 1e-6)) : 0));
+  const seedLots = eas.map((e, i) => {
+    const base = cap[i] > 0 ? Math.min(cap[i], (budget / m) / Math.max(e.ddPerLot, budget * 1e-6)) : 0;
+    return floor ? Math.min(cap[i], Math.max(base, floor[i])) : base;
+  });
   const seedDD = walk(equityAt(model, seedLots), model.T, CUTS);
   if (seedDD.dd > budget * 1e-9) {
     addCut(seedDD.peakIdx, seedDD.troughIdx, 0);
@@ -399,10 +418,10 @@ export function maxProfitLots(model, budget, opts = {}) {
   // The LP is homogeneous in the budget: caps and cut right-hand sides both
   // scale with it, so a solution found at one budget is the solution at any
   // other budget, rescaled. Cache the vertex per (model, cap) and scale.
-  const cacheKey = `${opts.riskCap || 1}|${maxLot}|${blocked ? blocked.map((b) => (b ? 1 : 0)).join("") : "-"}`;
+  const cacheKey = `${opts.riskCap || 1}|${maxLot}|${blocked ? blocked.map((b) => (b ? 1 : 0)).join("") : "-"}|${floor ? floor.join(",") : ""}`;
   let store = directionCache.get(model);
   if (!store) { store = new Map(); directionCache.set(model, store); }
-  const cached = store.get(cacheKey);
+  const cached = !floor && store.get(cacheKey);
   if (cached && cached.budget > 0 && budget > 0) {
     const f = budget / cached.budget;
     return { lots: cached.lots.map((v) => v * f), iters: cached.iters, converged: cached.converged, cap, warm: true };
@@ -418,7 +437,11 @@ export function maxProfitLots(model, budget, opts = {}) {
     if (!lp || !lp.x) break;
 
     const u = lp.x;
-    const w = u.map((v, i) => (cap[i] > 0 ? Math.min(cap[i], Math.max(0, v * scale[i])) : 0));
+    const w = u.map((v, i) => {
+      if (cap[i] <= 0) return floor ? floor[i] : 0;
+      const extra = Math.min(scale[i], Math.max(0, v * scale[i]));
+      return floor ? Math.min(cap[i], floor[i] + extra) : Math.min(cap[i], extra);
+    });
     const r = walk(equityAt(model, w), model.T, CUTS);
     if (r.dd <= budget * (1 + 1e-7)) {
       store.set(cacheKey, { budget, lots: w.slice(), iters: iters + 1, converged: true });
@@ -583,7 +606,9 @@ export function buildPlan(model, opts) {
   const effectiveBudget = Math.max(0, budget * safety);
   const warnings = [];
   const w = { maxLot, blocked, riskCap };
+  const eas = model.eas;
   let raw;
+  let minBookDD = null;
   let cap = capsFor(model, effectiveBudget, maxLot, blocked, riskCap);
 
   if (mode === "custom" && customLots) {
@@ -592,10 +617,19 @@ export function buildPlan(model, opts) {
     raw = uniformLots(model, effectiveBudget, w).lots;
   } else if (mode === "riskparity") {
     raw = riskParityLots(model, effectiveBudget, w).lots;
+  } else if (mode === "allin") {
+    // every strategy stays in the book at the smallest tradable size; the
+    // solver only decides how much to add on top of that floor
+    const floorLots = eas.map(() => lotStep);
+    const r = maxProfitLots(model, effectiveBudget, { ...w, floorLots });
+    raw = r.lots;
+    cap = r.cap;
+    minBookDD = r.minDD != null ? r.minDD : null;
   } else {
     raw = maxProfitLots(model, effectiveBudget, w).lots;
   }
   raw = raw.map((v, i) => {
+    if (mode === "allin") return Math.max(lotStep, Math.min(Math.max(v, lotStep), Math.max(cap[i], lotStep)));
     if (blocked && blocked[i]) return 0;
     // a hand-edited plan is the user's call; optimiser output respects the cap
     return mode === "custom" ? v : Math.min(v, cap[i]);
@@ -607,7 +641,9 @@ export function buildPlan(model, opts) {
   // Safety net: if the floor-rounded plan still breaches, scale the whole
   // book down (a uniform shrink scales drawdown by exactly the same factor).
   let guard = 0;
-  while (mode !== "custom" && ev.dd > effectiveBudget + 1e-6 && guard++ < 12) {
+  // "allin" keeps a mandatory floor: scaling the book down would silently drop
+  // strategies, so it reports the over-budget minimum instead.
+  while (mode !== "custom" && mode !== "allin" && ev.dd > effectiveBudget + 1e-6 && guard++ < 12) {
     const f = Math.max(0, (effectiveBudget / ev.dd) * 0.99);
     lots = lots.map((v) => roundDown(v * f, lotStep));
     ev = evaluatePlan(model, lots);
@@ -620,8 +656,16 @@ export function buildPlan(model, opts) {
   }
 
   const feasible = ev.dd <= effectiveBudget + 1e-6;
-  if (!feasible && mode !== "custom") {
+  if (!feasible && mode !== "custom" && mode !== "allin") {
     warnings.push("The broker lot step is too coarse for this budget - the plan is slightly over.");
+  }
+  if (mode === "allin" && !feasible) {
+    // quote the plan that is actually shown (every EA at >= one lot step)
+    warnings.push(
+      `Keeping all ${eas.length} strategies needs ${money(ev.dd)} of drawdown at ${lotStep} lots each - ` +
+      `above your ${money(effectiveBudget)} budget. Raise the budget to at least ${money(Math.ceil(ev.dd))}, ` +
+      `or use Max profit to drop the strategies that do not earn their risk.`,
+    );
   }
 
   const perEa = model.eas.map((e, i) => {

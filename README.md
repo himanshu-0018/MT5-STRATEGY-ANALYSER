@@ -159,6 +159,9 @@ How it stays fast:
   blocking work per file. `scanReport()` instead walks the string, reads only the
   Deals section and stops before the Orders table (which is usually most of the
   file). DOM parsing remains only as a fallback for unusual layouts.
+- **The monthly matrix is strategies-down, months-across** and sits full width;
+  a long history collapses to one column per year (with a Months/Years switch)
+  so nothing needs sideways scrolling however many strategies you load.
 - **The report list is virtualised** - 342 rows cost ~1.4k DOM nodes, not 5k cells.
 - **Typing is debounced** (220 ms) so the portfolio is not rebuilt per keystroke.
 - **Month/day buckets** reuse cached keys instead of allocating a `Date` per deal.

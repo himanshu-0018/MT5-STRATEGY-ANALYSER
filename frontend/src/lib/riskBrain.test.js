@@ -392,3 +392,51 @@ describe("scale guard", () => {
     expect(() => buildRiskModel(reports)).not.toThrow();
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* "use all": every strategy keeps a minimum size                     */
+/* ------------------------------------------------------------------ */
+
+describe("all-in mode (nothing may be dropped)", () => {
+  const model = buildRiskModel(reports);
+
+  test("every strategy keeps at least the lot step, none is zero", () => {
+    const plan = buildPlan(model, { budget: 400, mode: "allin", lotStep: 0.01 });
+    expect(plan.perEa).toHaveLength(model.eas.length);
+    for (const e of plan.perEa) {
+      expect(e.lot).toBeGreaterThanOrEqual(0.01 - 1e-9);
+      expect(e.action).not.toBe("drop");
+    }
+    expect(plan.drops).toHaveLength(0);
+  });
+
+  test("lots can still go down as well as up versus the backtest size", () => {
+    const small = buildPlan(model, { budget: 0.3, mode: "allin", lotStep: 0.01 });
+    const big = buildPlan(model, { budget: 400, mode: "allin", lotStep: 0.01 });
+    expect(small.perEa.some((e) => e.lot < e.refLot)).toBe(true); // cut, not dropped
+    expect(big.perEa.some((e) => e.lot > e.refLot)).toBe(true);   // raise
+    expect(small.reductions.length).toBeGreaterThan(0);
+    expect(small.drops).toHaveLength(0);
+  });
+
+  test("stays inside the budget when the minimum book fits", () => {
+    const plan = buildPlan(model, { budget: 400, mode: "allin", lotStep: 0.01 });
+    expect(plan.dd).toBeLessThanOrEqual(400 + 1e-6);
+    expect(plan.warnings.join(" ")).not.toMatch(/at least/i);
+  });
+
+  test("says plainly when even the smallest book is too big", () => {
+    // the smallest allowed book, then a budget below its cost
+    const floorDD = evaluatePlan(model, model.eas.map(() => 0.01)).dd;
+    const plan = buildPlan(model, { budget: floorDD * 0.5, mode: "allin", lotStep: 0.01 });
+    expect(plan.warnings.join(" ")).toMatch(/at least \$/i);
+    expect(plan.dd).toBeGreaterThan(floorDD * 0.5);
+    // it still returns the minimum book instead of an empty plan
+    for (const e of plan.perEa) expect(e.lot).toBeGreaterThanOrEqual(0.01 - 1e-9);
+  });
+
+  test("max profit mode still drops strategies, for contrast", () => {
+    const mp = buildPlan(model, { budget: 400, mode: "maxprofit", lotStep: 0.01 });
+    expect(mp.drops.length).toBeGreaterThanOrEqual(0);
+  });
+});

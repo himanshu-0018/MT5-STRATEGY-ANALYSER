@@ -27,6 +27,7 @@ const MODES = [
   { key: "maxprofit", label: "Max profit", hint: "Solve for the exact combination that earns the most inside the budget" },
   { key: "uniform", label: "Scale all", hint: "One multiplier applied to every strategy's original lot" },
   { key: "riskparity", label: "Equal risk", hint: "Same drawdown allowance per strategy - safe even if every EA draws down together" },
+  { key: "allin", label: "Use all", hint: "Every loaded strategy must stay in the book at 0.01 lots or more - lots can go up or down, nothing is dropped" },
 ];
 
 const TONE = {
