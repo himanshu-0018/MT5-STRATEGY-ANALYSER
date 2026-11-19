@@ -22,7 +22,7 @@ Frontend-only React. `lib/mt5Parser.js` (UTF-16/UTF-8 decode, DOMParser, Deals t
 
 
 ## Implemented (2026-11) – monthly matrix, hide toggle, "Use all" mode
-- **Monthly Profit** is now its own full-width section (like Individual Reports and the balance curve). The matrix is transposed - strategies are rows, periods are columns - so adding strategies grows the table downwards instead of forcing horizontal scrolling. Histories over 24 months collapse to one column per YEAR automatically (with a Months/Years switch; months at that density get real column widths and scroll deliberately rather than overlapping). Top 40 strategies are shown individually, the rest summed in a "+N more" row; amounts abbreviate above 14 months.
+- **Monthly Profit**: full-width section, months down the left and one column per strategy across (the layout the user asked for, matching his reference). No column cap - every loaded report gets its own column - the month column is sticky when the book is wide, and the row/column totals are kept. 14 reports fit a 1600px screen exactly; more scroll sideways with the month column pinned.
 - **Hide/unhide** per report: an eye button next to the bin toggles the same enabled state as the Use checkbox, greys the row and shows a HIDDEN badge - the report stays in the list.
 - **Lot Brain "Use all" mode**: every loaded strategy keeps at least one lot step (0.01) - nothing can be dropped, lots can still go up or down. Implemented as a floor in the LP (`w = floor + x`), with cuts accounting for the floor's contribution. If the minimum book alone breaches the budget it returns that book and a warning quoting the needed budget instead of silently shrinking strategies away.
 
