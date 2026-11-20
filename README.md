@@ -51,6 +51,11 @@ comments (`CG-M5`, `CG-H1`, `CG-GRID`, `CG-SCALP`). Click **Merge strategies**,
 tick the rows that belong to the same EA, type its name and they are joined back
 into one strategy (deals merged on one timeline, nothing lost).
 
+A merged strategy shows a `MERGED · n` badge and a layers button that opens its
+editor, where you can rename it, take strategies out (they return as their own
+rows) or fold more in. The arrangement is **saved in your browser**: upload the
+same file again and it comes back already merged, with no clicking.
+
 ## Two views
 
 ### Portfolio

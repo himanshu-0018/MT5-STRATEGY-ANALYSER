@@ -28,7 +28,8 @@ export function buildMergedReport(picked, rawName) {
 
   return {
     ...base,
-    id: `merged-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    id: base.id && base.id.startsWith("merged-") ? base.id : `merged-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    mergedParts: picked,
     fileName: [...new Set(picked.map((p) => p.fileName))].join(", "),
     label,
     expert: label,

@@ -21,6 +21,13 @@ Frontend-only React. `lib/mt5Parser.js` (UTF-16/UTF-8 decode, DOMParser, Deals t
 - $ / % toggle per day (day P&L vs. % of the balance at day open), month navigation across the whole uploaded range + month picker, monthly totals strip (net, trading days, trades, best/worst/avg day, win-day rate), click a day to list its deals with timestamps
 
 
+## Implemented (2026-11) – merge editing, saved merge rules, contrast
+- Merge mode is now unmistakable: cyan "MERGE" header, cyan checkboxes (filled when chosen), tinted selected rows with a left accent bar and a bright action bar; the toggle button is solid cyan while active.
+- Merged strategies keep their parts (`mergedParts`) and get a `MERGED · n` badge plus a layers button opening `MergeEditor`: rename, remove a part (it returns as its own row, a group of one dissolves), or add other strategies (checkbox list with trade counts and P&L).
+- `lib/mergeRules.js` persists one rule per (file, name) in localStorage (`qf.mergeRules.v1`); on upload the rules are re-applied automatically ("Re-applied 1 saved merges"). Removing a group down to one strategy forgets its rule; edits replace it rather than piling up duplicates.
+- The merge name field clears after every merge (it used to keep the previous name).
+- 6 tests for the rules store (dedupe, per-file separation, forget, corrupt storage).
+
 ## Implemented (2026-11) – Lot Brain runs in a worker with a live progress card
 - The optimiser used to run inside `useMemo` during render, freezing the tab with no feedback when the user changed mode/budget/risk settings.
 - `brainCompute.js` bundles buildPlan + the scaled "after" portfolio (light: curve/months/stats) + Monte Carlo + frontier + insights; `plan.worker.js` runs it in a Web Worker and `planClient.js` manages the worker, caches the model identity, and falls back to inline computing if workers are unavailable or error.

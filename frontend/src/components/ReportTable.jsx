@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { Trash2, Eye, EyeOff } from "lucide-react";
+import { Trash2, Eye, EyeOff, Layers } from "lucide-react";
+import { MergeEditor } from "./MergeEditor";
 import { Checkbox } from "./ui/checkbox";
 import { money, fmtDate, REPORT_COLORS } from "../lib/portfolio";
 
@@ -15,8 +16,9 @@ const COL_COUNT = 11;
 const H = ({ children, right }) => <th className={`qf-label py-3 px-3 font-medium ${right ? "text-right" : "text-left"}`}>{children}</th>;
 const C = ({ children, right, className = "" }) => <td className={`py-2 px-3 font-mono text-xs ${right ? "text-right" : ""} ${className}`}>{children}</td>;
 
-const ReportTableInner = ({ reports, summaries, enabled, onToggle, onRemove, mergeMode, mergeSel, onMergeMode, onMergeSel, onMerge }) => {
+const ReportTableInner = ({ reports, summaries, enabled, onToggle, onRemove, mergeMode, mergeSel, onMergeMode, onMergeSel, onMerge, onRemovePart, onAddToMerge, onRenameMerge }) => {
   const [mergeName, setMergeName] = useState("");
+  const [editing, setEditing] = useState(null);
   const scroller = useRef(null);
   const [range, setRange] = useState({ start: 0, end: Math.min(reports.length, 24) });
 
@@ -55,7 +57,7 @@ const ReportTableInner = ({ reports, summaries, enabled, onToggle, onRemove, mer
               data-testid="merge-mode-toggle"
               onClick={() => onMergeMode()}
               title="Join strategies that belong to the same EA into one"
-              className={`px-2.5 py-1 border text-[11px] font-mono transition-colors ${mergeMode ? "border-cyan-500/60 bg-cyan-500/15 text-cyan-300" : "border-slate-700 text-slate-400 hover:text-slate-200"}`}
+              className={`px-2.5 py-1 border text-[11px] font-mono transition-colors ${mergeMode ? "border-cyan-300 bg-cyan-400 text-slate-900 font-bold" : "border-cyan-500/50 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20"}`}
             >
               {mergeMode ? "Cancel merge" : "Merge strategies"}
             </button>
@@ -67,7 +69,7 @@ const ReportTableInner = ({ reports, summaries, enabled, onToggle, onRemove, mer
       <div ref={scroller} onScroll={recalc} className="max-h-[620px] overflow-auto">
         <table className="w-full min-w-[900px]">
           <thead className="sticky top-0 z-10 bg-[#111827] border-b border-slate-800">
-            <tr><H>{mergeMode ? "Merge" : "Use"}</H><H>Strategy</H><H>Symbol / TF</H><H>Range</H><H right>Deposit</H><H right>Trades</H><H right>Net Profit</H><H right>PF</H><H right>Win %</H><H right>Max DD</H><H /></tr>
+            <tr><th className={`qf-label py-3 px-3 font-medium text-left ${mergeMode ? "text-cyan-300" : ""}`}>{mergeMode ? "Merge" : "Use"}</th><H>Strategy</H><H>Symbol / TF</H><H>Range</H><H right>Deposit</H><H right>Trades</H><H right>Net Profit</H><H right>PF</H><H right>Win %</H><H right>Max DD</H><H /></tr>
           </thead>
           <tbody>
             {padTop > 0 && (
@@ -80,10 +82,15 @@ const ReportTableInner = ({ reports, summaries, enabled, onToggle, onRemove, mer
               const s = summaries[r.id];
               return (
                 <tr key={r.id} data-testid={`per-report-row-${i}`} style={{ height: ROW_H }}
-                  className={`border-b border-slate-800/60 transition-colors hover:bg-slate-800/30 ${enabled[r.id] ? "" : "opacity-40"}`}>
+                  className={`border-b border-slate-800/60 transition-colors hover:bg-slate-800/30 ${enabled[r.id] ? "" : "opacity-40"} ${mergeMode && mergeSel?.has(r.id) ? "bg-cyan-500/10 shadow-[inset_2px_0_0_0_#22d3ee]" : ""}`}>
                   <C>
                     {mergeMode ? (
-                      <Checkbox data-testid={`merge-check-${i}`} checked={!!mergeSel?.has(r.id)} onCheckedChange={() => onMergeSel(r.id)} />
+                      <Checkbox
+                        data-testid={`merge-check-${i}`}
+                        checked={!!mergeSel?.has(r.id)}
+                        onCheckedChange={() => onMergeSel(r.id)}
+                        className="border-cyan-400/70 bg-slate-800 data-[state=checked]:bg-cyan-400 data-[state=checked]:border-cyan-300 data-[state=checked]:text-slate-900 h-4 w-4"
+                      />
                     ) : (
                       <Checkbox data-testid={`report-include-checkbox-${i}`} checked={!!enabled[r.id]} onCheckedChange={() => onToggle(r.id)} />
                     )}
@@ -95,6 +102,11 @@ const ReportTableInner = ({ reports, summaries, enabled, onToggle, onRemove, mer
                     </div>
                     <div className="text-[11px] text-slate-500 font-mono mt-0.5 truncate max-w-[260px]">
                       {r.eaExpert ? `EA: ${r.eaExpert}` : r.fileName}
+                      {r.mergedParts?.length >= 2 && (
+                        <span className="ml-2 px-1 py-0.5 border border-cyan-500/50 bg-cyan-500/10 text-[9px] tracking-wider text-cyan-300">
+                          MERGED · {r.mergedParts.length}
+                        </span>
+                      )}
                       {!enabled[r.id] && <span className="ml-2 px-1 py-0.5 border border-slate-600 text-[9px] tracking-wider text-slate-400">HIDDEN</span>}
                     </div>
                   </C>
@@ -111,6 +123,16 @@ const ReportTableInner = ({ reports, summaries, enabled, onToggle, onRemove, mer
                   <C right className="text-red-400">-{money(s.dd.amount)} <span className="text-slate-500">({(s.dd.pct * 100).toFixed(2)}%)</span></C>
                   <C right>
                     <div className="flex items-center justify-end gap-2">
+                      {r.mergedParts?.length >= 2 && (
+                        <button
+                          data-testid={`report-edit-merge-${i}`}
+                          onClick={() => setEditing(r.id)}
+                          title="Edit this merged EA - rename it, remove or add strategies"
+                          className="text-cyan-300 hover:text-cyan-100 transition-colors"
+                        >
+                          <Layers className="h-4 w-4" />
+                        </button>
+                      )}
                       <button
                         data-testid={`report-hide-button-${i}`}
                         onClick={() => onToggle(r.id)}
@@ -136,19 +158,19 @@ const ReportTableInner = ({ reports, summaries, enabled, onToggle, onRemove, mer
         </table>
       </div>
       {mergeMode && (
-        <div className="mt-3 flex flex-wrap items-center gap-3 border border-cyan-500/30 bg-cyan-500/5 px-3 py-2">
-          <span className="qf-label text-cyan-300">{mergeSel?.size || 0} selected</span>
+        <div className="mt-3 flex flex-wrap items-center gap-3 border-2 border-cyan-400/60 bg-cyan-500/10 px-3 py-2.5">
+          <span className="font-mono text-xs font-bold text-cyan-200">{mergeSel?.size || 0} selected</span>
           <input
             data-testid="merge-name-input"
             value={mergeName}
             onChange={(e) => setMergeName(e.target.value)}
             placeholder="Name this EA (e.g. CG) - blank keeps the file name"
-            className="flex-1 min-w-[240px] bg-slate-900 border border-slate-700 px-2 py-1 text-xs text-slate-200 font-mono outline-none focus:border-cyan-500/60"
+            className="flex-1 min-w-[240px] bg-slate-950 border border-cyan-400/40 px-2 py-1.5 text-xs text-slate-100 font-mono outline-none focus:border-cyan-300"
           />
           <button
             data-testid="merge-confirm"
             disabled={(mergeSel?.size || 0) < 2}
-            onClick={() => onMerge(mergeSel, mergeName)}
+            onClick={() => { onMerge(mergeSel, mergeName); setMergeName(""); }}
             className="px-3 py-1 bg-cyan-500/20 border border-cyan-500/50 text-cyan-200 text-[11px] font-mono disabled:opacity-40 disabled:cursor-not-allowed hover:bg-cyan-500/30 transition-colors"
           >
             Merge into one EA
@@ -157,6 +179,19 @@ const ReportTableInner = ({ reports, summaries, enabled, onToggle, onRemove, mer
         </div>
       )}
       <p className="qf-label mt-3">Scroll to browse all {reports.length} reports - only the visible rows are drawn.</p>
+      {editing && (() => {
+        const merged = reports.find((r) => r.id === editing);
+        return merged && merged.mergedParts?.length >= 2 ? (
+          <MergeEditor
+            merged={merged}
+            reports={reports}
+            onClose={() => setEditing(null)}
+            onRemovePart={onRemovePart}
+            onAdd={onAddToMerge}
+            onRename={onRenameMerge}
+          />
+        ) : null;
+      })()}
     </div>
   );
 };

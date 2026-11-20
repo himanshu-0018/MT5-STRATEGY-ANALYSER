@@ -4,6 +4,7 @@ import { Toaster, toast } from "sonner";
 import { FlaskConical, Eraser, LayoutDashboard, BrainCircuit, Loader2, AlertTriangle } from "lucide-react";
 import { parseMt5Report, parseMt5Reports } from "./lib/mt5Parser";
 import { buildMergedReport } from "./lib/mergeReports";
+import { rulesForFile, saveMergeRule, forgetMergeRule, tagOf } from "./lib/mergeRules";
 import { buildPortfolio, reportSummary, REPORT_COLORS } from "./lib/portfolio";
 import { buildRiskModel, buildPlan, RiskModelTooLargeError } from "./lib/riskBrain";
 import { Uploader } from "./components/Uploader";
@@ -56,6 +57,7 @@ function App() {
     let firstError = "";
     let splitFiles = 0;
     let splitStrategies = 0;
+    let autoMerged = 0;
     uploadProgress.start(list.length);
     let cancelled = false;
     try {
@@ -67,7 +69,10 @@ function App() {
         try {
           const parts = parseMt5Reports(await f.arrayBuffer(), f.name, { splitByEa: uploadMode === "multi" });
           if (parts.length > 1) { splitFiles += 1; splitStrategies += parts.length; }
-          for (const p of parts) parsed.push(p);
+          // re-apply merges this file was split into before
+          const { reports: withMerges, merged } = applySavedMerges(parts);
+          if (merged) { autoMerged += merged; }
+          for (const p of withMerges) parsed.push(p);
         } catch (err) {
           failed += 1;
           if (!firstError) firstError = `${f.name}: ${err.message}`;
@@ -89,7 +94,32 @@ function App() {
     if (splitFiles) {
       toast.success(`${splitFiles} file${splitFiles === 1 ? "" : "s"} contained several EAs - split into ${splitStrategies} strategies`);
     }
+    if (autoMerged) {
+      toast.success(`Re-applied ${autoMerged} saved merges from previous uploads`);
+    }
     if (cancelled) toast(`Cancelled - kept ${parsed.length} report${parsed.length === 1 ? "" : "s"}`);
+  };
+
+  /**
+   * Apply the merges remembered for this file: split strategies that were
+   * grouped before arrive grouped again, without any clicking.
+   */
+  const applySavedMerges = (parts) => {
+    const rules = rulesForFile(parts[0]?.fileName).sort((a, b) => (b.tags || []).length - (a.tags || []).length);
+    let list = parts.slice();
+    let merged = 0;
+    for (const rule of rules) {
+      const tags = rule.tags || [];
+      const members = list.filter((p) => tags.includes(tagOf(p)));
+      if (members.length < 2) continue;
+      const group = buildMergedReport(members, rule.name);
+      if (!group) continue;
+      const ids = new Set(members.map((m) => m.id));
+      list = list.filter((p) => !ids.has(p.id));
+      list.push(group);
+      merged += 1;
+    }
+    return { reports: list, merged };
   };
 
   const loadSamples = async () => {
@@ -170,6 +200,20 @@ function App() {
    * the symbols are recomputed and the merged strategy takes the first one's
    * place. The Lot Brain then sizes it as a single EA.
    */
+  /**
+   * Rebuild a merged strategy from its parts, keeping its id and name.
+   * Used when parts are removed or more strategies are folded in.
+   */
+  const rebuildMerge = useCallback((merged, parts) => {
+    if (!parts.length) return null;
+    if (parts.length === 1) {
+      // a group of one is just that strategy again
+      return { ...parts[0], id: parts[0].id, mergedParts: undefined, mergedFrom: undefined };
+    }
+    const next = buildMergedReport(parts, merged.expert);
+    return next ? { ...next, id: merged.id, expert: merged.expert, label: merged.expert } : null;
+  }, []);
+
   const mergeSelected = useCallback((ids, rawName) => {
     const picked = reportsRef.current.filter((r) => ids.has(r.id));
     const merged = buildMergedReport(picked, rawName);
@@ -191,6 +235,58 @@ function App() {
     setMergeSel(() => new Set());
     toast.success(`Merged ${picked.length} strategies into ${merged.expert}`);
   }, []);
+
+  /** Remove one strategy from a merged group (it comes back as its own row). */
+  const removeFromMerge = useCallback((mergedId, partId) => {
+    // a group that shrinks to one strategy is no longer a group - forget the rule
+    const current = reportsRef.current.find((r) => r.id === mergedId);
+    if (current && (current.mergedParts || []).length <= 2) {
+      forgetMergeRule(current.fileName.split(", ")[0], current.expert);
+    }
+    setReports((prev) => {
+      const merged = prev.find((r) => r.id === mergedId);
+      if (!merged || !merged.mergedParts) return prev;
+      const parts = merged.mergedParts.filter((p) => p.id !== partId);
+      if (!parts.length) return prev;
+      const next = rebuildMerge(merged, parts);
+      if (!next) return prev;
+      return prev.map((r) => (r.id === mergedId ? next : r));
+    });
+    toast.success("Removed that strategy from the group");
+  }, [rebuildMerge]);
+
+  /** Fold more strategies into an existing group. */
+  const addToMerge = useCallback((mergedId, partIds) => {
+    setReports((prev) => {
+      const merged = prev.find((r) => r.id === mergedId);
+      if (!merged) return prev;
+      const add = prev.filter((r) => partIds.has(r.id) && r.id !== mergedId);
+      if (!add.length) return prev;
+      const parts = [...(merged.mergedParts || [merged]), ...add];
+      const next = rebuildMerge(merged, parts);
+      if (!next) return prev;
+      return prev.filter((r) => !partIds.has(r.id)).map((r) => (r.id === mergedId ? next : r));
+    });
+    toast.success("Added to the group");
+  }, [rebuildMerge]);
+
+  /** Rename a merged group (saved with the rule so re-uploads keep the name). */
+  const renameMerge = useCallback((mergedId, name) => {
+    const clean = String(name || "").trim();
+    if (!clean) return;
+    setReports((prev) => prev.map((r) => (
+      r.id === mergedId ? { ...r, expert: clean, label: clean, eaExpert: clean } : r
+    )));
+  }, []);
+
+  // keep the saved rules in step with whatever groups exist
+  useEffect(() => {
+    for (const r of reports) {
+      if (r.mergedParts && r.mergedParts.length >= 2) {
+        saveMergeRule(r.fileName.split(", ")[0], r.expert, r.mergedParts.map(tagOf).filter(Boolean));
+      }
+    }
+  }, [reports]);
 
   return (
     <div className="qf-app min-h-screen">
@@ -275,7 +371,10 @@ function App() {
               mergeSel={mergeSel}
               onMergeMode={toggleMergeMode}
               onMergeSel={toggleMergeSel}
-              onMerge={mergeSelected} />
+              onMerge={mergeSelected}
+              onRemovePart={removeFromMerge}
+              onAddToMerge={addToMerge}
+              onRenameMerge={renameMerge} />
             {tab === "brain" ? (
               active.length ? (
                 modelError ? (
